@@ -1,0 +1,10 @@
+{
+  "name": "overworld-visitor",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mineflayer bot that visits all regions in a Minecraft world",
+  "main": "index.js",
+  "dependencies": {
+    "mineflayer": "^4.23.0"
+  }
+}

@@ -1,0 +1,54 @@
+services:
+  mc:
+    image: itzg/minecraft-server:latest
+    restart: "no"
+    tty: true
+    stdin_open: true
+    environment:
+      EULA: "TRUE"
+      VERSION: "1.21.1"
+      ONLINE_MODE: "FALSE"
+      VIEW_DISTANCE: "32"
+      OPS: "${MC_USERNAME:-Bot}"
+      MOTD: "Overworld Chunk Visitor - New Only"
+      DIFFICULTY: "peaceful"
+      MODE: "creative"
+      SPAWN_PROTECTION: "0"
+      ENABLE_COMMAND_BLOCK: "true"
+      ENABLE_RCON: "true"
+      RCON_PASSWORD: "visitor"
+      MEMORY: "4G"
+      USE_AIKAR_FLAGS: "true"
+      MAX_TICK_TIME: "-1"
+      LEVEL: "world"
+    ports:
+      - "${MC_PORT:-25566}:25565"
+    volumes:
+      - './world:/data/world'
+      - './mc-data-new:/data'
+
+  visitor-new:
+    build: ./bot
+    restart: "no"
+    depends_on:
+      mc:
+        condition: service_healthy
+    environment:
+      - WORLD_DIR=/repo/world
+      - STATE_DIR=/app/state
+      - MC_HOST=mc
+      - MC_PORT=25565
+      - MC_USERNAME=${MC_USERNAME:-Bot}
+      - MC_AUTH=offline
+      - NEW_ONLY=true
+      - RENDER_DISTANCE=32
+      - FLY_Y=200
+      - GRID_STEP=80
+      - WP_DELAY=2000
+      - REGION_DELAY=3000
+      - SHUTDOWN_ON_COMPLETE=true
+    volumes:
+      - './world:/repo/world:ro'
+      - './.git:/repo/.git:ro'
+      - './state:/app/state'
+

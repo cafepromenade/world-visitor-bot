@@ -1,0 +1,3 @@
+@echo off
+echo Launching Overworld Visitor GUI (setup + management)...
+start "" "%~dp0gui\bin\Release\net10.0-windows\OverworldVisitor.exe"

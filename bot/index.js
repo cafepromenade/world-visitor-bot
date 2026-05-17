@@ -1,0 +1,260 @@
+const mineflayer = require('mineflayer');
+const path = require('path');
+const fs = require('fs');
+const { Vec3 } = require('vec3');
+const regions = require('./regions');
+
+const WORLD_DIR = process.env.WORLD_DIR || '/app/world';
+const STATE_DIR = process.env.STATE_DIR || '/app/state';
+
+const BOT_INDEX = parseInt(process.env.BOT_INDEX || '0');
+const BOT_COUNT = parseInt(process.env.BOT_COUNT || '1');
+const BOT_SUFFIX = BOT_COUNT > 1 ? `-bot${BOT_INDEX}` : '';
+const STATE_FILE = path.join(STATE_DIR, `visited${BOT_SUFFIX}.json`);
+
+const MC_HOST = process.env.MC_HOST || 'localhost';
+const MC_PORT = parseInt(process.env.MC_PORT || '25565');
+const MC_USERNAME = process.env.MC_USERNAME || 'Bot';
+const MC_USERNAME_FULL = BOT_COUNT > 1 ? `${MC_USERNAME}${BOT_INDEX}` : MC_USERNAME;
+const MC_AUTH = process.env.MC_AUTH || 'offline';
+const NEW_ONLY = process.env.NEW_ONLY === 'true';
+const FLY_Y = parseInt(process.env.FLY_Y || '200');
+const RENDER_DISTANCE = parseInt(process.env.RENDER_DISTANCE || '32');
+const GRID_STEP = parseInt(process.env.GRID_STEP || '80');
+const WP_DELAY = parseInt(process.env.WP_DELAY || '2000');
+const REGION_DELAY = parseInt(process.env.REGION_DELAY || '3000');
+const CHUNK_SETTLE_TIMEOUT = parseInt(process.env.CHUNK_SETTLE_TIMEOUT || '15000');
+const CHUNK_SETTLE_COOLDOWN = parseInt(process.env.CHUNK_SETTLE_COOLDOWN || '1500');
+const SHUTDOWN_ON_COMPLETE = process.env.SHUTDOWN_ON_COMPLETE === 'true';
+const FOLLOW_PLAYER = process.env.FOLLOW_PLAYER || '';
+
+let state;
+let todo = [];
+let idx = 0;
+let bot;
+
+function log(msg) {
+  console.log(`[${new Date().toISOString()}] ${msg}`);
+}
+
+function init() {
+  let allRegions = regions.getAllRegions(WORLD_DIR);
+  // filter: each bot gets every Nth region
+  allRegions = allRegions.filter((_, i) => i % BOT_COUNT === BOT_INDEX);
+  log(`Found ${allRegions.length} regions assigned to bot ${BOT_INDEX}/${BOT_COUNT}`);
+
+  state = regions.loadState(STATE_FILE);
+  const result = regions.selectRegions(allRegions, state, NEW_ONLY, WORLD_DIR);
+
+  todo = result.regions;
+  state.lastCommit = result.currentCommit || state.lastCommit;
+
+  if (todo.length === 0) {
+    log('All regions already visited. Nothing to do.');
+    process.exit(0);
+  }
+
+  log(`Will visit ${todo.length} regions (NEW_ONLY=${NEW_ONLY})`);
+  log(`Server: ${MC_HOST}:${MC_PORT}  Username: ${MC_USERNAME_FULL}  Auth: ${MC_AUTH}`);
+  log(`Render distance: ${RENDER_DISTANCE}  Flight Y: ${FLY_Y}  Grid step: ${GRID_STEP} blocks`);
+
+  connect();
+}
+
+function connect() {
+  bot = mineflayer.createBot({
+    host: MC_HOST,
+    port: MC_PORT,
+    username: MC_USERNAME_FULL,
+    auth: MC_AUTH,
+    viewDistance: RENDER_DISTANCE
+  });
+
+  bot.once('spawn', onSpawn);
+  bot.on('kicked', onKicked);
+  bot.on('error', onError);
+  bot.on('end', onEnd);
+  bot.on('health', onHealth);
+}
+
+function onHealth() {
+  if (bot.health < 20) {
+    log(`WARN: took damage! Health: ${bot.health}  Food: ${bot.food}  Position: ${bot.entity.position}`);
+    bot.chat(`/effect give ${MC_USERNAME_FULL} minecraft:instant_health 1 5`);
+    bot.chat(`/effect give ${MC_USERNAME_FULL} minecraft:resistance 9999 5 true`);
+  }
+}
+
+function onSpawn() {
+  log('Bot spawned. Starting flight mode...');
+  bot.chat(`/gamemode creative ${MC_USERNAME_FULL}`);
+  if (FOLLOW_PLAYER) {
+    bot.chat(`/op ${FOLLOW_PLAYER}`);
+    log(`OP'd follow player: ${FOLLOW_PLAYER}`);
+  }
+  setTimeout(() => {
+    bot.creative.startFlying();
+    log('Flying enabled. Starting region visits in 3s...');
+    setTimeout(processNext, 3000);
+  }, 2000);
+}
+
+function onKicked(reason) {
+  log(`Kicked: ${reason}`);
+  process.exit(1);
+}
+
+function onError(err) {
+  log(`Error: ${err.message}`);
+}
+
+function onEnd() {
+  log('Connection ended');
+  if (idx < todo.length) {
+    log('Reconnecting in 10s...');
+    setTimeout(connect, 10000);
+  }
+}
+
+function buildFlightGrid(cx, cz, halfSize) {
+  const waypoints = [];
+  const step = GRID_STEP;
+
+  for (let offset = -halfSize; offset <= halfSize; offset += step) {
+    const row = [];
+    for (let cross = -halfSize; cross <= halfSize; cross += step) {
+      row.push({ ox: offset, oz: cross });
+    }
+    if (waypoints.length % 2 === 1) {
+      row.reverse();
+    }
+    waypoints.push(...row);
+  }
+
+  return waypoints.map(wp => ({
+    x: cx + wp.ox,
+    y: FLY_Y,
+    z: cz + wp.oz
+  }));
+}
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function waitForChunksToSettle() {
+  return new Promise((resolve) => {
+    let lastChunkTime = Date.now();
+    const onChunk = () => { lastChunkTime = Date.now(); };
+
+    bot._client.on('map_chunk', onChunk);
+
+    const start = Date.now();
+    const check = setInterval(() => {
+      if (Date.now() - start >= CHUNK_SETTLE_TIMEOUT) {
+        clearInterval(check);
+        bot._client.removeListener('map_chunk', onChunk);
+        resolve();
+        return;
+      }
+      if (Date.now() - lastChunkTime >= CHUNK_SETTLE_COOLDOWN) {
+        clearInterval(check);
+        bot._client.removeListener('map_chunk', onChunk);
+        resolve();
+      }
+    }, 250);
+  });
+}
+
+async function flyRegion(target, index) {
+  const regionSize = 512;
+  const half = regionSize / 2;
+  const waypoints = buildFlightGrid(target.cx, target.cz, half);
+  const start = Date.now();
+
+  log(`[${index}/${todo.length}] Region (${target.rx}, ${target.rz}) @ (${target.cx}, ${FLY_Y}, ${target.cz}) - ${waypoints.length} waypoints`);
+
+  for (let i = 0; i < waypoints.length; i++) {
+    const wp = waypoints[i];
+    const dest = new Vec3(wp.x, wp.y, wp.z);
+
+    // tp follow player if set
+    const followFile = path.join(STATE_DIR, 'follow_player.txt');
+    let followPlayer = FOLLOW_PLAYER;
+    try { const f = fs.readFileSync(followFile, 'utf8').trim(); if (f) followPlayer = f; } catch {}
+    if (followPlayer) {
+      bot.chat(`/tp ${followPlayer} ${wp.x} ${wp.y + 5} ${wp.z}`);
+    }
+
+    try {
+      await Promise.race([
+        bot.creative.flyTo(dest),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('flyTo timeout')), 8000))
+      ]);
+    } catch {
+      bot.chat(`/tp ${MC_USERNAME_FULL} ${wp.x} ${wp.y} ${wp.z}`);
+    }
+
+    await waitForChunksToSettle();
+
+    if (i % 3 === 0) {
+      log(`[${index}/${todo.length}]   waypoint ${i + 1}/${waypoints.length} @ (${wp.x}, ${FLY_Y}, ${wp.z})`);
+    }
+
+    if (i < waypoints.length - 1) {
+      await delay(WP_DELAY);
+    }
+  }
+
+  const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+  log(`[${index}/${todo.length}] Region (${target.rx}, ${target.rz}) complete in ${elapsed}s`);
+}
+
+async function processNext() {
+  if (idx >= todo.length) {
+    log('All regions visited! Saving state...');
+    regions.saveState(STATE_FILE, state);
+    log('Done.');
+    if (SHUTDOWN_ON_COMPLETE) {
+      log('Shutting down server in 10s...');
+      await delay(10000);
+      bot.chat('/stop');
+    }
+    await delay(3000);
+    bot.end();
+    process.exit(0);
+    return;
+  }
+
+  const current = idx + 1;
+  const target = todo[idx];
+  const key = regions.regionKey(target.rx, target.rz);
+
+  if (state.visited && state.visited[key]) {
+    log(`[${current}/${todo.length}] Already visited (${target.rx},${target.rz}) - skipping`);
+    idx++;
+    processNext();
+    return;
+  }
+
+  try {
+    bot.chat(`/tp ${MC_USERNAME_FULL} ${target.cx} ${FLY_Y} ${target.cz}`);
+    await delay(REGION_DELAY);
+
+    await flyRegion(target, current);
+
+    regions.markVisited(state, target.rx, target.rz);
+
+    if (current % 20 === 0 || current === todo.length) {
+      regions.saveState(STATE_FILE, state);
+      log(`Progress saved: ${current}/${todo.length}`);
+    }
+  } catch (err) {
+    log(`Error in region (${target.rx},${target.rz}): ${err.message}`);
+  }
+
+  idx++;
+  processNext();
+}
+
+init();
