@@ -166,6 +166,13 @@
                     Click="BtnCopyCmd_Click" Margin="0,0,8,4"/>
             <Button Content="Stop &amp; Close" Width="100" Height="36"
                     Style="{StaticResource DangerButton}" Click="BtnStopClose_Click" Margin="0,0,8,4"/>
+
+            <Border Width="1" Background="{StaticResource BorderColor}" Margin="8,4,12,4"/>
+
+            <TextBox x:Name="txtOpUser" Width="120" Height="26" VerticalAlignment="Center"
+                     Text="TransitDC" Margin="0,0,6,4"/>
+            <Button x:Name="btnOp" Content="OP User" Width="80" Height="26"
+                    Click="BtnOp_Click" Margin="0,0,8,4"/>
         </WrapPanel>
 
         <!-- Row 3: Log -->

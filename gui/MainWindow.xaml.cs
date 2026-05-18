@@ -155,6 +155,20 @@ public partial class MainWindow : Window
     private void BtnLaunchMc_Click(object sender, RoutedEventArgs e) => LaunchMinecraft();
     private async void BtnStopClose_Click(object sender, RoutedEventArgs e) { await StopAsync(); Close(); }
 
+    private async void BtnOp_Click(object sender, RoutedEventArgs e)
+    {
+        var user = txtOpUser.Text.Trim();
+        if (string.IsNullOrEmpty(user)) return;
+        btnOp.IsEnabled = false;
+        try
+        {
+            var result = await RunCmd("docker", $"compose exec -T mc rcon-cli \"op {user}\"");
+            Log($"OP {user}: {result.Trim()}");
+        }
+        catch (Exception ex) { LogErr($"OP failed: {ex.Message}"); }
+        btnOp.IsEnabled = true;
+    }
+
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         if (!_isRunning) return;
