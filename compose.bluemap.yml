@@ -7,7 +7,7 @@ services:
       - '8100:8100'
     volumes:
       - './config:/app/config'
-      - './world:/app/world'
+      - '${WORLD_PATH:-./world}:/app/world'
       - './data:/app/data'
       - './web:/app/web'
       - './world_nether:/app/world_nether'

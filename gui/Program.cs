@@ -4,7 +4,7 @@ namespace OverworldVisitor;
 
 public class CliOptions
 {
-    public string? Username;
+    public string? Username, WorldPath;
     public int? Port, Render, FlyY, GridStep;
     public bool NewOnly, AutoStart, ShowHelp;
 }
@@ -23,6 +23,7 @@ static class Program
                 case "-r": case "--render": if (i + 1 < args.Length && int.TryParse(args[++i], out var rd)) o.Render = rd; break;
                 case "-y": case "--fly-y": if (i + 1 < args.Length && int.TryParse(args[++i], out var fy)) o.FlyY = fy; break;
                 case "-g": case "--grid": if (i + 1 < args.Length && int.TryParse(args[++i], out var gs)) o.GridStep = gs; break;
+                case "-w": case "--world": if (i + 1 < args.Length) o.WorldPath = args[++i]; break;
                 case "-n": case "--new-only": o.NewOnly = true; break;
                 case "-a": case "--auto": o.AutoStart = true; break;
                 case "-h": case "--help": o.ShowHelp = true; break;
@@ -50,6 +51,7 @@ Options:
   -r, --render <dist>     Render distance in chunks (default: 32)
   -y, --fly-y <y>         Flight altitude (default: 120)
   -g, --grid <step>       Grid step in blocks (default: 80)
+  -w, --world <path>      World folder path (default: ./world)
   -n, --new-only          Start in new-only mode
   -a, --auto              Auto-start server + bot on launch
   -h, --help              Show this help

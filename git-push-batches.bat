@@ -15,7 +15,7 @@ mkdir "%BATCH_DIR%"
 :: Group region files into 1500MB batches
 set "batch=0"
 set "size=0"
-for %%f in (world\region\*.mca) do (
+for %%f in (world\dimensions\minecraft\overworld\region\*.mca) do (
     for %%s in (%%~zf) do set /a "size += (%%s / 1048576)"
     set /a "sizeMB = !size!"
     if !sizeMB! geq %MAX_SIZE% (
@@ -34,8 +34,8 @@ for /l %%b in (0,1,!batch!) do (
     
     :: Copy batch files to world/region/
     if exist "%BATCH_DIR%\batch-%%b\*.mca" (
-        copy "%BATCH_DIR%\batch-%%b\*.mca" world\region\ >nul 2>&1
-        git add world\region\*.mca
+        copy "%BATCH_DIR%\batch-%%b\*.mca" world\dimensions\minecraft\overworld\region\ >nul 2>&1
+        git add world\dimensions\minecraft\overworld\region\*.mca
         git add state\
         git commit -m "chore: world region batch %%b/!batch!"
         

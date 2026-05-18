@@ -16,7 +16,7 @@ batch=0
 size=0
 mkdir -p "$BATCH_DIR/batch-$batch"
 
-for f in world/region/*.mca; do
+for f in world/dimensions/minecraft/overworld/region/*.mca; do
     fsize=$(stat -c%s "$f" 2>/dev/null || stat -f%z "$f" 2>/dev/null)
     size=$((size + fsize))
     if [ $size -ge $MAX_SIZE ]; then
@@ -34,8 +34,8 @@ for b in $(seq 0 $batch); do
     echo "--- Pushing batch $b/$batch ---"
     
     if ls "$BATCH_DIR/batch-$b"/*.mca &>/dev/null; then
-        cp "$BATCH_DIR/batch-$b"/*.mca world/region/
-        git add world/region/*.mca state/
+        cp "$BATCH_DIR/batch-$b"/*.mca world/dimensions/minecraft/overworld/region/
+        git add world/dimensions/minecraft/overworld/region/*.mca state/
         git commit -m "chore: world region batch $b/$batch" || true
         git push || { echo "[FAIL] Batch $b push failed"; fail=$((fail + 1)); }
     fi

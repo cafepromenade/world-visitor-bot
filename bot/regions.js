@@ -14,8 +14,10 @@ function regionCenter(rx, rz) {
   return { x: rx * 512 + 256, z: rz * 512 + 256 };
 }
 
+const OVERWORLD_REGION = ['dimensions', 'minecraft', 'overworld', 'region'];
+
 function getAllRegions(worldDir) {
-  const regionDir = path.join(worldDir, 'region');
+  const regionDir = path.join(worldDir, ...OVERWORLD_REGION);
   if (!fs.existsSync(regionDir)) return [];
   return fs.readdirSync(regionDir)
     .map(f => {
@@ -49,8 +51,10 @@ function getGitDiffRegions(worldDir, oldCommit, newCommit) {
   try {
     const repoRoot = path.resolve(worldDir, '..');
     const gitDir = path.join(repoRoot, '.git');
+    const regionDir = path.join(worldDir, ...OVERWORLD_REGION);
+    const relativeRegion = path.relative(repoRoot, regionDir).replace(/\\/g, '/');
     const out = execSync(
-      `git --git-dir="${gitDir}" --work-tree="${repoRoot}" diff --name-only --diff-filter=AM ${oldCommit} ${newCommit} -- world/region/`,
+      `git --git-dir="${gitDir}" --work-tree="${repoRoot}" diff --name-only --diff-filter=AM ${oldCommit} ${newCommit} -- ${relativeRegion}/`,
       { encoding: 'utf8' }
     ).trim();
     if (!out) return [];

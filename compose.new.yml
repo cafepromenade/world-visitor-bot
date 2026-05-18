@@ -9,7 +9,7 @@ services:
       TYPE: "PAPER"
       VERSION: "26.1.2"
       ONLINE_MODE: "FALSE"
-      VIEW_DISTANCE: "32"
+      VIEW_DISTANCE: "28"
       OPS: "${MC_USERNAME:-Bot}"
       MOTD: "Overworld Chunk Visitor - New Only"
       DIFFICULTY: "peaceful"
@@ -26,7 +26,7 @@ services:
     ports:
       - "${MC_PORT:-25566}:25565"
     volumes:
-      - './world:/data/world'
+      - '${WORLD_PATH:-./world}:/data/world'
       - './mc-data-new:/data'
 
   visitor-new:
@@ -43,14 +43,14 @@ services:
       - MC_USERNAME=${MC_USERNAME:-Bot}
       - MC_AUTH=offline
       - NEW_ONLY=true
-      - RENDER_DISTANCE=32
+      - RENDER_DISTANCE=28
       - FLY_Y=200
       - GRID_STEP=80
       - WP_DELAY=2000
       - REGION_DELAY=3000
       - SHUTDOWN_ON_COMPLETE=true
     volumes:
-      - './world:/repo/world:ro'
+      - '${WORLD_PATH:-./world}:/repo/world:ro'
       - './.git:/repo/.git:ro'
       - './state:/app/state'
 

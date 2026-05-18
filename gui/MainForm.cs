@@ -7,7 +7,7 @@ namespace OverworldVisitor;
 public class MainForm : Form
 {
     // Settings
-    private TextBox _txtUsername = null!;
+    private TextBox _txtUsername = null!, _txtWorldPath = null!;
     private NumericUpDown _numPort = null!, _numRender = null!, _numFlyY = null!, _numGridStep = null!, _numBotCount = null!;
     private RadioButton _rbAll = null!, _rbNew = null!;
 
@@ -83,15 +83,20 @@ public class MainForm : Form
         int y = 8;
 
         // ── Settings ──
-        var gb = new GroupBox { Text = "Settings", Left = 10, Top = y, Width = 360, Height = 390 };
+        var gb = new GroupBox { Text = "Settings", Left = 10, Top = y, Width = 360, Height = 430 };
         StyleGroupBox(gb);
         int sy = 24;
         AddSLabel(gb, "Username:", 14, sy);          _txtUsername = AddSText(gb, 140, sy, 180);
         AddSLabel(gb, "Port:", 14, sy += 34);         _numPort = SNum(gb, 140, sy, 100, 1, 65535, 25565);
-        AddSLabel(gb, "Render Dist:", 14, sy += 34);  _numRender = SNum(gb, 140, sy, 100, 2, 64, 32);
+        AddSLabel(gb, "Render Dist:", 14, sy += 34);  _numRender = SNum(gb, 140, sy, 100, 2, 64, 28);
         AddSLabel(gb, "Fly Y:", 14, sy += 34);        _numFlyY = SNum(gb, 140, sy, 100, 1, 320, 200);
         AddSLabel(gb, "Grid Step:", 14, sy += 34);    _numGridStep = SNum(gb, 140, sy, 100, 16, 256, 160);
         gb.Controls.Add(new Label { Left = 248, Top = sy + 3, Width = 80, Text = "blocks" });
+        AddSLabel(gb, "World Path:", 14, sy += 34);  _txtWorldPath = AddSText(gb, 140, sy, 200);
+        var btnBrowse = new Button { Left = 345, Top = sy, Width = 30, Height = 22, Text = "...", FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(60, 60, 70), ForeColor = Color.White, Cursor = Cursors.Hand };
+        btnBrowse.FlatAppearance.BorderSize = 0;
+        btnBrowse.Click += (_, _) => BrowseWorldPath();
+        gb.Controls.Add(btnBrowse);
         AddSLabel(gb, "Bot Count:", 14, sy += 34);    _numBotCount = SNum(gb, 140, sy, 100, 1, 4, 1);
 
         _rbAll = new RadioButton { Left = 22, Top = sy += 40, Width = 140, Height = 24, Text = "All Regions", Checked = true };
@@ -114,9 +119,10 @@ public class MainForm : Form
         // Set defaults
         _txtUsername.Text = "Bot";
         _txtFollowPlayer.Text = "TransitDC";
+        _txtWorldPath.Text = "./world";
 
         // ── Stats panel ──
-        var gbStats = new GroupBox { Text = "Live Stats", Left = gb.Right + 12, Top = y, Width = 270, Height = 390 };
+        var gbStats = new GroupBox { Text = "Live Stats", Left = gb.Right + 12, Top = y, Width = 270, Height = 430 };
         StyleGroupBox(gbStats);
         int ssy = 26;
         _lblCurrentRegion = AddStat(gbStats, "Region:", "--", ref ssy);
@@ -242,6 +248,7 @@ public class MainForm : Form
                     case "RENDER_DISTANCE": if (int.TryParse(v, out var rd)) _numRender.Value = rd; break;
                     case "FLY_Y": if (int.TryParse(v, out var fy)) _numFlyY.Value = fy; break;
                     case "GRID_STEP": if (int.TryParse(v, out var gs)) _numGridStep.Value = gs; break;
+                    case "WORLD_PATH": _txtWorldPath.Text = v; break;
                 }
             }
         }
@@ -260,6 +267,7 @@ public class MainForm : Form
             $"FLY_Y={(int)_numFlyY.Value}",
             $"GRID_STEP={(int)_numGridStep.Value}",
             $"BOT_COUNT={(int)_numBotCount.Value}",
+            $"WORLD_PATH={_txtWorldPath.Text}",
             $"FOLLOW_PLAYER={(_cbFollow.Checked ? _txtFollowPlayer.Text.Trim() : "")}",
             ""
         });
@@ -273,7 +281,20 @@ public class MainForm : Form
         if (opts.Render.HasValue) _numRender.Value = opts.Render.Value;
         if (opts.FlyY.HasValue) _numFlyY.Value = opts.FlyY.Value;
         if (opts.GridStep.HasValue) _numGridStep.Value = opts.GridStep.Value;
+        if (opts.WorldPath != null) _txtWorldPath.Text = opts.WorldPath;
         if (opts.NewOnly) { _rbAll.Checked = false; _rbNew.Checked = true; }
+    }
+
+    private void BrowseWorldPath()
+    {
+        using var dlg = new FolderBrowserDialog { Description = "Select the world folder (e.g. the 'world' directory)", UseDescriptionForTitle = true };
+        if (!string.IsNullOrEmpty(_txtWorldPath.Text) && Directory.Exists(_txtWorldPath.Text))
+            dlg.SelectedPath = _txtWorldPath.Text;
+        if (dlg.ShowDialog() == DialogResult.OK)
+        {
+            _txtWorldPath.Text = dlg.SelectedPath;
+            SaveSettings();
+        }
     }
 
     // ── Follow toggle ───────────────────────────────────
@@ -538,7 +559,10 @@ public class MainForm : Form
     // ── State file access ───────────────────────────────
     private int CountRegionFiles()
     {
-        var dir = Path.Combine(_projectRoot, "world", "region");
+        var worldPath = string.IsNullOrEmpty(_txtWorldPath.Text) ? Path.Combine(_projectRoot, "world") : _txtWorldPath.Text;
+        if (!Path.IsPathRooted(worldPath))
+            worldPath = Path.Combine(_projectRoot, worldPath);
+        var dir = Path.Combine(worldPath, "dimensions", "minecraft", "overworld", "region");
         if (!Directory.Exists(dir)) return 0;
         return Directory.GetFiles(dir, "r.*.*.mca").Length;
     }
