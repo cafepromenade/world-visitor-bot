@@ -27,7 +27,6 @@ services:
     ports:
       - "${MC_PORT:-25566}:25565"
     volumes:
-      - '${WORLD_PATH:-./world}:/data/world'
       - './mc-data-new:/data'
       - './config/spigot.yml:/data/spigot.yml:ro'
 
@@ -52,7 +51,7 @@ services:
       - REGION_DELAY=3000
       - SHUTDOWN_ON_COMPLETE=true
     volumes:
-      - '${WORLD_PATH:-./world}:/repo/world:ro'
+      - '${WORLD_PATH:-./mc-data-new/world}:/repo/world:ro'
       - './.git:/repo/.git:ro'
       - './state:/app/state'
 

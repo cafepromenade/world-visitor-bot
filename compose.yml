@@ -27,7 +27,6 @@ services:
     ports:
       - "${MC_PORT:-25565}:25565"
     volumes:
-      - '${WORLD_PATH:-./world}:/data/world'
       - './mc-data:/data'
       - './config/spigot.yml:/data/spigot.yml:ro'
 
@@ -55,7 +54,7 @@ services:
       - BOT_COUNT=${BOT_COUNT:-1}
       - BOT_INDEX=0
     volumes:
-      - '${WORLD_PATH:-./world}:/repo/world:ro'
+      - '${WORLD_PATH:-./mc-data/world}:/repo/world:ro'
       - './.git:/repo/.git:ro'
       - './state:/app/state'
 
@@ -85,7 +84,7 @@ services:
       - BOT_COUNT=${BOT_COUNT:-2}
       - BOT_INDEX=1
     volumes:
-      - '${WORLD_PATH:-./world}:/repo/world:ro'
+      - '${WORLD_PATH:-./mc-data/world}:/repo/world:ro'
       - './.git:/repo/.git:ro'
       - './state:/app/state'
 
@@ -145,7 +144,7 @@ services:
       - BOT_COUNT=${BOT_COUNT:-4}
       - BOT_INDEX=3
     volumes:
-      - '${WORLD_PATH:-./world}:/repo/world:ro'
+      - '${WORLD_PATH:-./mc-data/world}:/repo/world:ro'
       - './.git:/repo/.git:ro'
       - './state:/app/state'
 
