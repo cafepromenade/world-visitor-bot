@@ -15,7 +15,8 @@ public partial class MainWindow : Window
     private bool _isRunning;
     private int _totalRegions, _visitedRegions, _currentIndex;
     private DateTime _startTime;
-    private string _projectRoot;
+    private string _projectRoot = ResolveProjectRoot();
+    private bool _initialized;
     private string _lastRegionText = "";
     private int _currentRx, _currentRz;
     private string _currentWpX = "", _currentWpZ = "";
@@ -30,12 +31,15 @@ public partial class MainWindow : Window
         @"waypoint\s*(\d+)/(\d+)",
         RegexOptions.Compiled);
 
-    public MainWindow(CliOptions? opts = null)
+    public MainWindow()
     {
         InitializeComponent();
-        _projectRoot = ResolveProjectRoot();
-
         LoadSettings();
+        _initialized = true;
+    }
+
+    public MainWindow(CliOptions? opts) : this()
+    {
         if (opts != null) ApplyCliOptions(opts);
 
         if (opts?.AutoStart == true)
@@ -108,13 +112,16 @@ public partial class MainWindow : Window
     }
 
     // ── Event handlers ──────────
-    private void OnSettingChanged(object sender, TextChangedEventArgs e) => SaveSettings();
-    private void OnModeChanged(object sender, RoutedEventArgs e) => SaveSettings();
+    private void OnSettingChanged(object sender, TextChangedEventArgs e) { if (_initialized) SaveSettings(); }
+    private void OnModeChanged(object sender, RoutedEventArgs e) { if (_initialized) SaveSettings(); }
 
     private void OnFollowChanged(object sender, RoutedEventArgs e)
     {
-        SaveSettings();
-        WriteFollowFile();
+        if (_initialized)
+        {
+            SaveSettings();
+            WriteFollowFile();
+        }
     }
 
     private void BtnBrowseWorld_Click(object sender, RoutedEventArgs e)
