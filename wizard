@@ -17,9 +17,15 @@ sep()   { echo ""; }
 
 TOTAL=4
 
+# ----- Linux check -----
+if [ "$(uname -s)" != "Linux" ]; then
+  echo "This script is Linux-only. Detected: $(uname -s)"
+  exit 1
+fi
+
 # ----- Defaults -----
 MC_USERNAME_DEF="Bot"
-WORLD_PATH_DEF="./world"
+WORLD_PATH_DEF="./mc-data/world"
 FLY_Y_DEF=200
 GRID_STEP_DEF=160
 RENDER_DISTANCE_DEF=28
