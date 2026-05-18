@@ -2,12 +2,20 @@
 set -e
 
 DETACH=
+INTERACTIVE=
 BOT_COUNT=4
 
 for arg in "$@"; do
   case "$arg" in
+    -i|--interactive) INTERACTIVE=1 ;;
     -d|--detach) DETACH=1 ;;
     [1-4]) BOT_COUNT="$arg" ;;
+    -h|--help)
+      echo "Usage: $0 [bot-count] [-d|--detach] [-i|--interactive]"
+      echo "  bot-count       Number of parallel bots (1-4, default: 4)"
+      echo "  -d, --detach    Run containers in background"
+      echo "  -i, --interactive  Prompt for configuration"
+      exit 0 ;;
   esac
 done
 
@@ -70,6 +78,48 @@ echo "  World:       ${WORLD_PATH}"
 echo "  Fly Y:       ${FLY_Y}"
 echo "  Grid step:   ${GRID_STEP}"
 echo ""
+
+# ----- Interactive prompts -----
+if [ -n "$INTERACTIVE" ]; then
+  echo "--- Interactive Configuration ---"
+  read -r -p "Bot username [${MC_USERNAME}]: " input
+  MC_USERNAME="${input:-$MC_USERNAME}"
+  read -r -p "World path [${WORLD_PATH}]: " input
+  WORLD_PATH="${input:-$WORLD_PATH}"
+  read -r -p "Flight Y altitude [${FLY_Y}]: " input
+  FLY_Y="${input:-$FLY_Y}"
+  read -r -p "Grid step (blocks) [${GRID_STEP}]: " input
+  GRID_STEP="${input:-$GRID_STEP}"
+  read -r -p "Render distance (chunks) [${RENDER_DISTANCE}]: " input
+  RENDER_DISTANCE="${input:-$RENDER_DISTANCE}"
+  echo ""
+
+  # Save to .env for future runs
+  cat > .env << EOF
+MC_HOST=localhost
+MC_PORT=25565
+MC_USERNAME=${MC_USERNAME}
+MC_AUTH=offline
+RENDER_DISTANCE=${RENDER_DISTANCE}
+FLY_Y=${FLY_Y}
+GRID_STEP=${GRID_STEP}
+BOT_COUNT=${BOT_COUNT}
+WORLD_PATH=${WORLD_PATH}
+WP_DELAY=${WP_DELAY:-2000}
+REGION_DELAY=${REGION_DELAY:-2000}
+CHUNK_SETTLE_TIMEOUT=${CHUNK_SETTLE_TIMEOUT:-15000}
+CHUNK_SETTLE_COOLDOWN=${CHUNK_SETTLE_COOLDOWN:-1500}
+EOF
+
+  echo "--- Launching with ---"
+  echo "  Bots:        ${BOT_COUNT}"
+  echo "  Username:    ${MC_USERNAME}"
+  echo "  World:       ${WORLD_PATH}"
+  echo "  Fly Y:       ${FLY_Y}"
+  echo "  Grid step:   ${GRID_STEP}"
+  echo "  Render dist: ${RENDER_DISTANCE}"
+  echo ""
+fi
 
 # ----- Build bot image if needed -----
 if ! docker image inspect world-visitor-bot-visitor &>/dev/null; then
