@@ -20,6 +20,7 @@ services:
       RCON_PASSWORD: "visitor"
       MEMORY: "4G"
       USE_AIKAR_FLAGS: "true"
+      JVM_OPTS: "-DPaper.useAtomicWorldMove=false"
       MAX_TICK_TIME: "-1"
       LEVEL: "world"
       MODRINTH_PROJECTS: "viaversion,viabackwards"
