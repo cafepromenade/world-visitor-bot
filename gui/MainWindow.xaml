@@ -1,0 +1,178 @@
+<Window x:Class="OverworldVisitor.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Overworld Visitor" Height="860" Width="940"
+        MinWidth="880" MinHeight="700"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="CanResizeWithGrip"
+        Closing="OnClosing">
+
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Row 0: Settings + Stats -->
+        <Grid Grid.Row="0" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="380"/>
+                <ColumnDefinition Width="12"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Settings Panel -->
+            <GroupBox Grid.Column="0" Header="Settings" Padding="10">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="100"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="32"/>
+                        <RowDefinition Height="32"/>
+                        <RowDefinition Height="32"/>
+                        <RowDefinition Height="32"/>
+                        <RowDefinition Height="32"/>
+                        <RowDefinition Height="32"/>
+                        <RowDefinition Height="32"/>
+                        <RowDefinition Height="14"/>
+                        <RowDefinition Height="30"/>
+                        <RowDefinition Height="30"/>
+                        <RowDefinition Height="34"/>
+                    </Grid.RowDefinitions>
+
+                    <Label Grid.Row="0" Grid.Column="0" Content="Username"/>
+                    <TextBox x:Name="txtUsername" Grid.Row="0" Grid.Column="1" Text="Bot" VerticalAlignment="Center" TextChanged="OnSettingChanged"/>
+
+                    <Label Grid.Row="1" Grid.Column="0" Content="Port"/>
+                    <TextBox x:Name="txtPort" Grid.Row="1" Grid.Column="1" Text="25565" Width="80" HorizontalAlignment="Left" VerticalAlignment="Center" TextChanged="OnSettingChanged"/>
+
+                    <Label Grid.Row="2" Grid.Column="0" Content="Render Dist"/>
+                    <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal">
+                        <TextBox x:Name="txtRender" Text="28" Width="50" VerticalAlignment="Center" TextChanged="OnSettingChanged"/>
+                        <Label Content="chunks" Margin="6,0,0,0" Foreground="{StaticResource FgSecondary}"/>
+                    </StackPanel>
+
+                    <Label Grid.Row="3" Grid.Column="0" Content="Fly Y"/>
+                    <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal">
+                        <TextBox x:Name="txtFlyY" Text="200" Width="50" VerticalAlignment="Center" TextChanged="OnSettingChanged"/>
+                        <Label Content="blocks" Margin="6,0,0,0" Foreground="{StaticResource FgSecondary}"/>
+                    </StackPanel>
+
+                    <Label Grid.Row="4" Grid.Column="0" Content="Grid Step"/>
+                    <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal">
+                        <TextBox x:Name="txtGridStep" Text="160" Width="50" VerticalAlignment="Center" TextChanged="OnSettingChanged"/>
+                        <Label Content="blocks" Margin="6,0,0,0" Foreground="{StaticResource FgSecondary}"/>
+                    </StackPanel>
+
+                    <Label Grid.Row="5" Grid.Column="0" Content="World Path"/>
+                    <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal">
+                        <TextBox x:Name="txtWorldPath" Text="./world" Width="175" VerticalAlignment="Center" TextChanged="OnSettingChanged"/>
+                        <Button Content="..." Width="30" Height="24" Padding="0" FontSize="14" Click="BtnBrowseWorld_Click"
+                                Style="{StaticResource {x:Type Button}}" Margin="4,0,0,0"/>
+                    </StackPanel>
+
+                    <Label Grid.Row="6" Grid.Column="0" Content="Bot Count"/>
+                    <TextBox x:Name="txtBotCount" Grid.Row="6" Grid.Column="1" Text="1" Width="50" HorizontalAlignment="Left" VerticalAlignment="Center" TextChanged="OnSettingChanged"/>
+
+                    <Label Grid.Row="8" Grid.Column="0" Content="Mode"/>
+                    <StackPanel Grid.Row="8" Grid.Column="1" Orientation="Horizontal">
+                        <RadioButton x:Name="rbAll" Content="All Regions" IsChecked="True" Checked="OnModeChanged"/>
+                        <RadioButton x:Name="rbNew" Content="New Only" Margin="16,0,0,0" Checked="OnModeChanged"/>
+                    </StackPanel>
+
+                    <CheckBox x:Name="cbFollow" Grid.Row="9" Grid.Column="1" Content="Follow bot in-game" Margin="0,0,0,4" Checked="OnFollowChanged" Unchecked="OnFollowChanged"/>
+                    <StackPanel Grid.Row="10" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal">
+                        <Label Content="Player" Width="100"/>
+                        <TextBox x:Name="txtFollowPlayer" Text="TransitDC" Width="150" VerticalAlignment="Center" TextChanged="OnFollowChanged"/>
+                    </StackPanel>
+                </Grid>
+            </GroupBox>
+
+            <!-- Stats Panel -->
+            <GroupBox Grid.Column="2" Header="Live Stats" Padding="10">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="70"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="26"/>
+                        <RowDefinition Height="26"/>
+                        <RowDefinition Height="26"/>
+                        <RowDefinition Height="26"/>
+                        <RowDefinition Height="10"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="10"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <Label Grid.Row="0" Grid.Column="0" Content="Region" FontWeight="SemiBold"/>
+                    <Label x:Name="lblRegion" Grid.Row="0" Grid.Column="1" Style="{StaticResource StatLabel}" Content="--"/>
+
+                    <Label Grid.Row="1" Grid.Column="0" Content="Position" FontWeight="SemiBold"/>
+                    <Label x:Name="lblPosition" Grid.Row="1" Grid.Column="1" Style="{StaticResource StatLabel}" Content="--"/>
+
+                    <Label Grid.Row="2" Grid.Column="0" Content="Elapsed" FontWeight="SemiBold"/>
+                    <Label x:Name="lblElapsed" Grid.Row="2" Grid.Column="1" Style="{StaticResource StatLabel}" Content="--"/>
+
+                    <Label Grid.Row="3" Grid.Column="0" Content="ETA" FontWeight="SemiBold"/>
+                    <Label x:Name="lblEta" Grid.Row="3" Grid.Column="1" Style="{StaticResource StatLabel}" Content="--"/>
+
+                    <StackPanel Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2">
+                        <Label x:Name="lblProgress" Content="Not started" FontSize="12" Foreground="{StaticResource FgPrimary}"/>
+                        <ProgressBar x:Name="progressRegions" Height="22" Minimum="0" Maximum="100" Margin="0,4,0,0"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2">
+                        <Label x:Name="lblWpProgress" Content="Waypoint: --" FontSize="11" Foreground="{StaticResource FgSecondary}"/>
+                        <ProgressBar x:Name="progressWaypoints" Height="12" Minimum="0" Maximum="100" Margin="0,2,0,0"/>
+                    </StackPanel>
+                </Grid>
+            </GroupBox>
+        </Grid>
+
+        <!-- Row 1: Server IP + status -->
+        <Grid Grid.Row="1" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Label x:Name="lblServer" Grid.Column="0" Content="Server: not running"
+                   FontSize="14" FontWeight="Bold" Foreground="{StaticResource FgSecondary}"
+                   HorizontalContentAlignment="Center" VerticalAlignment="Center"/>
+            <Button x:Name="btnCopyIp" Grid.Column="1" Content="Copy IP" Width="80" Height="26" Click="BtnCopyIp_Click"
+                    Margin="0,0,6,0"/>
+            <Label x:Name="lblStatus" Grid.Column="2" Content="Ready" Width="120"
+                   FontSize="13" Foreground="{StaticResource FgSecondary}"
+                   HorizontalContentAlignment="Right" VerticalAlignment="Center"/>
+        </Grid>
+
+        <!-- Row 2: Buttons -->
+        <WrapPanel Grid.Row="2" Margin="0,0,0,10">
+            <Button x:Name="btnStart" Content="Start Server + Bot" Width="160" Height="36"
+                    Style="{StaticResource PrimaryButton}" Click="BtnStart_Click" Margin="0,0,8,4"/>
+            <Button x:Name="btnStop" Content="Stop All" Width="90" Height="36"
+                    Style="{StaticResource DangerButton}" Click="BtnStop_Click" IsEnabled="False" Margin="0,0,8,4"/>
+            <Button x:Name="btnBuild" Content="Rebuild Bot" Width="100" Height="36"
+                    Click="BtnBuild_Click" Margin="0,0,8,4"/>
+            <Button x:Name="btnLaunchMc" Content="Launch MC" Width="100" Height="36"
+                    Style="{StaticResource ActionButton}" Click="BtnLaunchMc_Click" Margin="0,0,8,4"/>
+            <Button x:Name="btnCopyCmd" Content="Copy Command" Width="110" Height="36"
+                    Click="BtnCopyCmd_Click" Margin="0,0,8,4"/>
+            <Button Content="Stop &amp; Close" Width="100" Height="36"
+                    Style="{StaticResource DangerButton}" Click="BtnStopClose_Click" Margin="0,0,8,4"/>
+        </WrapPanel>
+
+        <!-- Row 3: Log -->
+        <RichTextBox x:Name="rtbLog" Grid.Row="3" IsReadOnly="True"
+                     Background="{StaticResource BgMedium}" Foreground="{StaticResource FgPrimary}"
+                     BorderBrush="{StaticResource BorderColor}" BorderThickness="1"
+                     FontFamily="Consolas" FontSize="12"
+                     VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
+    </Grid>
+</Window>

@@ -1,5 +1,3 @@
-using System.Windows.Forms;
-
 namespace OverworldVisitor;
 
 public class CliOptions
@@ -9,9 +7,9 @@ public class CliOptions
     public bool NewOnly, AutoStart, ShowHelp;
 }
 
-static class Program
+public static class Cli
 {
-    private static CliOptions ParseArgs(string[] args)
+    public static CliOptions ParseArgs(string[] args)
     {
         var o = new CliOptions();
         for (int i = 0; i < args.Length; i++)
@@ -30,38 +28,5 @@ static class Program
             }
         }
         return o;
-    }
-
-    [STAThread]
-    static void Main(string[] args)
-    {
-        var opts = ParseArgs(args);
-
-        if (opts.ShowHelp)
-        {
-            Console.WriteLine(@"
-Overworld Visitor GUI
-
-Usage:
-  OverworldVisitor.exe [options]
-
-Options:
-  -u, --username <name>   Bot username (default: Bot)
-  -p, --port <port>       Server port (default: 25565)
-  -r, --render <dist>     Render distance in chunks (default: 32)
-  -y, --fly-y <y>         Flight altitude (default: 120)
-  -g, --grid <step>       Grid step in blocks (default: 80)
-  -w, --world <path>      World folder path (default: ./world)
-  -n, --new-only          Start in new-only mode
-  -a, --auto              Auto-start server + bot on launch
-  -h, --help              Show this help
-");
-            return;
-        }
-
-        Application.SetHighDpiMode(HighDpiMode.SystemAware);
-        Application.EnableVisualStyles();
-        Application.SetCompatibleTextRenderingDefault(false);
-        Application.Run(new MainForm(opts));
     }
 }

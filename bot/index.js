@@ -67,6 +67,7 @@ function connect() {
     port: MC_PORT,
     username: MC_USERNAME_FULL,
     auth: MC_AUTH,
+    version: "1.21.1",
     viewDistance: RENDER_DISTANCE
   });
 
