@@ -88,7 +88,7 @@ public class MainForm : Form
         int sy = 24;
         AddSLabel(gb, "Username:", 14, sy);          _txtUsername = AddSText(gb, 140, sy, 180);
         AddSLabel(gb, "Port:", 14, sy += 34);         _numPort = SNum(gb, 140, sy, 100, 1, 65535, 25565);
-        AddSLabel(gb, "Render Dist:", 14, sy += 34);  _numRender = SNum(gb, 140, sy, 100, 2, 64, 28);
+        AddSLabel(gb, "Render Dist:", 14, sy += 34);  _numRender = SNum(gb, 140, sy, 100, 4, 32, 28);
         AddSLabel(gb, "Fly Y:", 14, sy += 34);        _numFlyY = SNum(gb, 140, sy, 100, 1, 320, 200);
         AddSLabel(gb, "Grid Step:", 14, sy += 34);    _numGridStep = SNum(gb, 140, sy, 100, 16, 256, 160);
         gb.Controls.Add(new Label { Left = 248, Top = sy + 3, Width = 80, Text = "blocks" });
