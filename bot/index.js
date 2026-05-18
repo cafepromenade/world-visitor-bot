@@ -23,8 +23,7 @@ const RENDER_DISTANCE = parseInt(process.env.RENDER_DISTANCE || '32');
 const GRID_STEP = parseInt(process.env.GRID_STEP || '80');
 const WP_DELAY = parseInt(process.env.WP_DELAY || '2000');
 const REGION_DELAY = parseInt(process.env.REGION_DELAY || '3000');
-const CHUNK_SETTLE_TIMEOUT = parseInt(process.env.CHUNK_SETTLE_TIMEOUT || '15000');
-const CHUNK_SETTLE_COOLDOWN = parseInt(process.env.CHUNK_SETTLE_COOLDOWN || '1500');
+const CHUNK_LOAD_TIMEOUT = parseInt(process.env.CHUNK_LOAD_TIMEOUT || '300000');
 const SHUTDOWN_ON_COMPLETE = process.env.SHUTDOWN_ON_COMPLETE === 'true';
 const FOLLOW_PLAYER = process.env.FOLLOW_PLAYER || '';
 
@@ -32,6 +31,8 @@ let state;
 let todo = [];
 let idx = 0;
 let bot;
+let reconnectAttempts = 0;
+let shouldReconnect = false;
 
 function log(msg) {
   console.log(`[${new Date().toISOString()}] ${msg}`);
@@ -75,6 +76,7 @@ function connect() {
   bot.on('error', onError);
   bot.on('end', onEnd);
   bot.on('health', onHealth);
+  bot.on('playerJoined', onPlayerJoined);
 }
 
 function onHealth() {
@@ -85,8 +87,16 @@ function onHealth() {
   }
 }
 
+function onPlayerJoined(player) {
+  if (player.username === MC_USERNAME_FULL) return;
+  log(`Player joined: ${player.username} - granting OP`);
+  bot.chat(`/op ${player.username}`);
+}
+
 function onSpawn() {
   log('Bot spawned. Starting flight mode...');
+  reconnectAttempts = 0;
+  shouldReconnect = false;
   bot.chat(`/gamemode creative ${MC_USERNAME_FULL}`);
   if (FOLLOW_PLAYER) {
     bot.chat(`/op ${FOLLOW_PLAYER}`);
@@ -101,18 +111,28 @@ function onSpawn() {
 
 function onKicked(reason) {
   log(`Kicked: ${reason}`);
-  process.exit(1);
+  shouldReconnect = true;
 }
 
 function onError(err) {
   log(`Error: ${err.message}`);
+  if (err.code === 'ECONNRESET' || err.code === 'ECONNREFUSED' || err.code === 'ETIMEDOUT' || err.message.includes('socket hang up')) {
+    shouldReconnect = true;
+  }
 }
 
 function onEnd() {
   log('Connection ended');
-  if (idx < todo.length) {
-    log('Reconnecting in 10s...');
+  if (idx < todo.length && shouldReconnect && reconnectAttempts < 10) {
+    reconnectAttempts++;
+    log(`Reconnecting in 10s... (attempt ${reconnectAttempts}/10)`);
     setTimeout(connect, 10000);
+  } else if (idx >= todo.length) {
+    log('All regions visited. Exiting.');
+    process.exit(0);
+  } else {
+    log('Max reconnect attempts reached or not reconnecting. Exiting.');
+    process.exit(1);
   }
 }
 
@@ -142,28 +162,30 @@ function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function waitForChunksToSettle() {
-  return new Promise((resolve) => {
-    let lastChunkTime = Date.now();
-    const onChunk = () => { lastChunkTime = Date.now(); };
+async function waitForChunksLoaded() {
+  const start = Date.now();
+  const step = Math.max(4, Math.floor(RENDER_DISTANCE / 4));
+  const pos = bot.entity.position;
+  const cx = Math.floor(pos.x / 16);
+  const cz = Math.floor(pos.z / 16);
 
-    bot._client.on('map_chunk', onChunk);
+  while (Date.now() - start < CHUNK_LOAD_TIMEOUT) {
+    await bot.waitForChunksToLoad();
 
-    const start = Date.now();
-    const check = setInterval(() => {
-      if (Date.now() - start >= CHUNK_SETTLE_TIMEOUT) {
-        clearInterval(check);
-        bot._client.removeListener('map_chunk', onChunk);
-        resolve();
-        return;
+    let allLoaded = true;
+    for (let dx = -RENDER_DISTANCE; dx <= RENDER_DISTANCE && allLoaded; dx += step) {
+      for (let dz = -RENDER_DISTANCE; dz <= RENDER_DISTANCE && allLoaded; dz += step) {
+        if (!bot.world.getColumn(cx + dx, cz + dz)) {
+          allLoaded = false;
+        }
       }
-      if (Date.now() - lastChunkTime >= CHUNK_SETTLE_COOLDOWN) {
-        clearInterval(check);
-        bot._client.removeListener('map_chunk', onChunk);
-        resolve();
-      }
-    }, 250);
-  });
+    }
+
+    if (allLoaded) return;
+    await delay(1000);
+  }
+
+  log('WARN: Chunks not fully loaded after timeout');
 }
 
 async function flyRegion(target, index) {
@@ -189,13 +211,13 @@ async function flyRegion(target, index) {
     try {
       await Promise.race([
         bot.creative.flyTo(dest),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('flyTo timeout')), 8000))
+        new Promise((_, reject) => setTimeout(() => reject(new Error('flyTo timeout')), CHUNK_LOAD_TIMEOUT))
       ]);
     } catch {
       bot.chat(`/tp ${MC_USERNAME_FULL} ${wp.x} ${wp.y} ${wp.z}`);
     }
 
-    await waitForChunksToSettle();
+    await waitForChunksLoaded();
 
     if (i % 3 === 0) {
       log(`[${index}/${todo.length}]   waypoint ${i + 1}/${waypoints.length} @ (${wp.x}, ${FLY_Y}, ${wp.z})`);
@@ -251,6 +273,10 @@ async function processNext() {
     }
   } catch (err) {
     log(`Error in region (${target.rx},${target.rz}): ${err.message}`);
+    if (err.code === 'ECONNRESET' || err.code === 'ECONNREFUSED' || err.code === 'ETIMEDOUT' || err.message.includes('socket hang up')) {
+      shouldReconnect = true;
+      return;
+    }
   }
 
   idx++;

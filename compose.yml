@@ -49,6 +49,7 @@ services:
       - GRID_STEP=160
       - WP_DELAY=1000
       - REGION_DELAY=2000
+      - CHUNK_LOAD_TIMEOUT=${CHUNK_LOAD_TIMEOUT:-300000}
       - FOLLOW_PLAYER=${FOLLOW_PLAYER:-}
       - SHUTDOWN_ON_COMPLETE=true
       - BOT_COUNT=${BOT_COUNT:-1}
@@ -79,6 +80,7 @@ services:
       - GRID_STEP=160
       - WP_DELAY=1000
       - REGION_DELAY=2000
+      - CHUNK_LOAD_TIMEOUT=${CHUNK_LOAD_TIMEOUT:-300000}
       - FOLLOW_PLAYER=${FOLLOW_PLAYER:-}
       - SHUTDOWN_ON_COMPLETE=false
       - BOT_COUNT=${BOT_COUNT:-2}
@@ -109,12 +111,13 @@ services:
       - GRID_STEP=160
       - WP_DELAY=1000
       - REGION_DELAY=2000
+      - CHUNK_LOAD_TIMEOUT=${CHUNK_LOAD_TIMEOUT:-300000}
       - FOLLOW_PLAYER=${FOLLOW_PLAYER:-}
       - SHUTDOWN_ON_COMPLETE=false
       - BOT_COUNT=${BOT_COUNT:-3}
       - BOT_INDEX=2
     volumes:
-      - '${WORLD_PATH:-./world}:/repo/world:ro'
+      - '${WORLD_PATH:-./mc-data/world}:/repo/world:ro'
       - './.git:/repo/.git:ro'
       - './state:/app/state'
 
@@ -139,6 +142,7 @@ services:
       - GRID_STEP=160
       - WP_DELAY=1000
       - REGION_DELAY=2000
+      - CHUNK_LOAD_TIMEOUT=${CHUNK_LOAD_TIMEOUT:-300000}
       - FOLLOW_PLAYER=${FOLLOW_PLAYER:-}
       - SHUTDOWN_ON_COMPLETE=false
       - BOT_COUNT=${BOT_COUNT:-4}
