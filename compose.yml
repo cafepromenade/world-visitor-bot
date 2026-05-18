@@ -28,6 +28,7 @@ services:
     volumes:
       - '${WORLD_PATH:-./world}:/data/world'
       - './mc-data:/data'
+      - './config/spigot.yml:/data/spigot.yml:ro'
 
   visitor:
     build: ./bot

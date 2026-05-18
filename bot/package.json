@@ -5,6 +5,6 @@
   "description": "Mineflayer bot that visits all regions in a Minecraft world",
   "main": "index.js",
   "dependencies": {
-    "mineflayer": "^4.23.0"
+    "mineflayer": "^4.37.1"
   }
 }
