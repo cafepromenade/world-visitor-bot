@@ -1,0 +1,195 @@
+#!/bin/bash
+set -e
+
+cd "$(dirname "$0")"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+step()  { echo -e "${CYAN}[${1}/${TOTAL}]${NC} $2"; }
+ok()    { echo -e "  ${GREEN}✓${NC} $1"; }
+skip()  { echo -e "  ${YELLOW}→${NC} $1"; }
+err()   { echo -e "  ${RED}✗${NC} $1"; }
+sep()   { echo ""; }
+
+TOTAL=4
+
+# ----- Defaults -----
+MC_USERNAME_DEF="Bot"
+WORLD_PATH_DEF="./world"
+FLY_Y_DEF=200
+GRID_STEP_DEF=160
+RENDER_DISTANCE_DEF=28
+BOT_COUNT_DEF=4
+WP_DELAY_DEF=2000
+REGION_DELAY_DEF=2000
+
+# Load existing .env values if present
+[ -f .env ] && source .env
+
+MC_USERNAME="${MC_USERNAME:-$MC_USERNAME_DEF}"
+WORLD_PATH="${WORLD_PATH:-$WORLD_PATH_DEF}"
+FLY_Y="${FLY_Y:-$FLY_Y_DEF}"
+GRID_STEP="${GRID_STEP:-$GRID_STEP_DEF}"
+RENDER_DISTANCE="${RENDER_DISTANCE:-$RENDER_DISTANCE_DEF}"
+BOT_COUNT="${BOT_COUNT:-$BOT_COUNT_DEF}"
+WP_DELAY="${WP_DELAY:-$WP_DELAY_DEF}"
+REGION_DELAY="${REGION_DELAY:-$REGION_DELAY_DEF}"
+NEW_ONLY="${NEW_ONLY:-false}"
+
+cat << "EOF"
+╔══════════════════════════════════════════╗
+║    Overworld Visitor Wizard             ║
+║    Press Enter to accept defaults       ║
+╚══════════════════════════════════════════╝
+EOF
+sep
+
+# ===== Step 1: Configuration =====
+step 1 "Configuration"
+
+read -r -p "  Bot username [${MC_USERNAME}]: " input
+MC_USERNAME="${input:-$MC_USERNAME}"
+
+read -r -p "  World path [${WORLD_PATH}]: " input
+WORLD_PATH="${input:-$WORLD_PATH}"
+
+read -r -p "  Flight Y altitude [${FLY_Y}]: " input
+FLY_Y="${input:-$FLY_Y}"
+
+read -r -p "  Grid step (blocks) [${GRID_STEP}]: " input
+GRID_STEP="${input:-$GRID_STEP}"
+
+read -r -p "  Render distance (chunks) [${RENDER_DISTANCE}]: " input
+RENDER_DISTANCE="${input:-$RENDER_DISTANCE}"
+
+read -r -p "  Number of bots (1-4) [${BOT_COUNT}]: " input
+BOT_COUNT="${input:-$BOT_COUNT}"
+
+ok "Configuration set"
+sep
+
+# ===== Step 2: Visit mode =====
+step 2 "Visit mode"
+echo "  1) All regions (full scan)"
+echo "  2) New only (git-diff: only changed regions)"
+read -r -p "  Choice [1]: " input
+if [ "${input:-1}" = "2" ]; then
+  NEW_ONLY=true
+  MODE_LABEL="new regions only"
+else
+  NEW_ONLY=false
+  MODE_LABEL="all regions"
+fi
+ok "Mode: ${MODE_LABEL}"
+sep
+
+# ===== Step 3: Run =====
+step 3 "Run"
+echo "  1) Attached (watch output, Ctrl+C to stop)"
+echo "  2) Detached (background)"
+read -r -p "  Choice [1]: " input
+
+# Save .env
+cat > .env << EOF
+MC_HOST=localhost
+MC_PORT=${MC_PORT:-25565}
+MC_USERNAME=${MC_USERNAME}
+MC_AUTH=offline
+RENDER_DISTANCE=${RENDER_DISTANCE}
+FLY_Y=${FLY_Y}
+GRID_STEP=${GRID_STEP}
+BOT_COUNT=${BOT_COUNT}
+WORLD_PATH=${WORLD_PATH}
+WP_DELAY=${WP_DELAY}
+REGION_DELAY=${REGION_DELAY}
+NEW_ONLY=${NEW_ONLY}
+CHUNK_SETTLE_TIMEOUT=${CHUNK_SETTLE_TIMEOUT:-15000}
+CHUNK_SETTLE_COOLDOWN=${CHUNK_SETTLE_COOLDOWN:-1500}
+EOF
+
+# Install deps if missing
+if ! command -v docker &>/dev/null; then
+  echo "[...] Installing Docker..."
+  curl -fsSL https://get.docker.com | sh
+fi
+
+# Build image if needed
+if ! docker image inspect world-visitor-bot-visitor &>/dev/null; then
+  echo "[...] Building bot Docker image..."
+  docker compose build visitor
+fi
+
+# Export vars
+export BOT_COUNT MC_USERNAME WORLD_PATH FLY_Y GRID_STEP RENDER_DISTANCE
+export WP_DELAY REGION_DELAY CHUNK_SETTLE_TIMEOUT CHUNK_SETTLE_COOLDOWN
+
+echo ""
+echo "  Mode:       ${MODE_LABEL}"
+echo "  Bots:       ${BOT_COUNT}"
+echo "  Username:   ${MC_USERNAME}"
+echo "  World:      ${WORLD_PATH}"
+echo "  Fly Y:      ${FLY_Y}"
+echo "  Grid step:  ${GRID_STEP}"
+echo ""
+
+if [ "${input:-1}" = "2" ]; then
+  echo "[...] Starting in background..."
+  UP_FLAGS="-d"
+else
+  echo "[...] Starting (Ctrl+C to stop)..."
+  UP_FLAGS="--abort-on-container-exit"
+fi
+
+if [ "$NEW_ONLY" = "true" ]; then
+  COMPOSE_FILE="-f compose.new.yml"
+  SERVICES="mc visitor-new"
+else
+  COMPOSE_FILE=""
+  case "$BOT_COUNT" in
+    1) SERVICES="mc visitor" ;;
+    2) SERVICES="mc visitor visitor1" ;;
+    3) SERVICES="mc visitor visitor1 visitor2" ;;
+    4) SERVICES="mc visitor visitor1 visitor2 visitor3" ;;
+  esac
+  [ "$BOT_COUNT" -gt 1 ] && MULTI_PROFILE="--profile multi" || MULTI_PROFILE=""
+fi
+
+set +e
+if [ "$NEW_ONLY" = "true" ]; then
+  docker compose $COMPOSE_FILE up $UP_FLAGS $SERVICES
+  EXIT_CODE=$?
+else
+  docker compose $MULTI_PROFILE up $UP_FLAGS $SERVICES
+  EXIT_CODE=$?
+fi
+set -e
+
+ok "Bots finished (exit code: ${EXIT_CODE})"
+sep
+
+# ===== Step 4: Git push =====
+step 4 "Git push"
+echo "  Visited state files in ./state/ were updated."
+read -r -p "  Commit and push state changes? [Y/n]: " input
+if [[ "${input:-Y}" =~ ^[Yy]$ ]]; then
+  read -r -p "  Commit message [update visited state]: " msg
+  msg="${msg:-update visited state}"
+
+  git add state/
+  if git diff --cached --quiet; then
+    skip "No state changes to commit"
+  else
+    git commit -m "$msg"
+    git push
+    ok "Pushed: $msg"
+  fi
+else
+  skip "Skipped git push"
+fi
+sep
+
+echo -e "${GREEN}All done!${NC}"
