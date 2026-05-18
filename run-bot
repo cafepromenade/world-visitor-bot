@@ -79,6 +79,15 @@ echo "  Fly Y:       ${FLY_Y}"
 echo "  Grid step:   ${GRID_STEP}"
 echo ""
 
+# ----- Fix world directory permissions -----
+if [ -d "$WORLD_PATH" ]; then
+  OWNER=$(stat -c '%u' "$WORLD_PATH" 2>/dev/null || echo "0")
+  if [ "$OWNER" = "0" ]; then
+    echo "[...] Fixing world directory ownership..."
+    sudo chown -R 1000:1000 "$WORLD_PATH" 2>/dev/null || chown -R 1000:1000 "$WORLD_PATH" 2>/dev/null || true
+  fi
+fi
+
 # ----- Interactive prompts -----
 if [ -n "$INTERACTIVE" ]; then
   echo "--- Interactive Configuration ---"

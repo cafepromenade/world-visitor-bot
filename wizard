@@ -123,6 +123,15 @@ if ! docker image inspect world-visitor-bot-visitor &>/dev/null; then
   docker compose build visitor
 fi
 
+# Fix world directory permissions for container user
+if [ -d "$WORLD_PATH" ]; then
+  OWNER=$(stat -c '%u' "$WORLD_PATH")
+  if [ "$OWNER" = "0" ]; then
+    echo "[...] Fixing world directory ownership..."
+    sudo chown -R 1000:1000 "$WORLD_PATH" 2>/dev/null || chown -R 1000:1000 "$WORLD_PATH" 2>/dev/null || true
+  fi
+fi
+
 # Export vars
 export BOT_COUNT MC_USERNAME WORLD_PATH FLY_Y GRID_STEP RENDER_DISTANCE
 export WP_DELAY REGION_DELAY CHUNK_SETTLE_TIMEOUT CHUNK_SETTLE_COOLDOWN
