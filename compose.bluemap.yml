@@ -1,0 +1,14 @@
+services:
+  bluemap:
+    image: ghcr.io/bluemap-minecraft/bluemap:latest
+    restart: unless-stopped
+    command: -r -f -u -w
+    ports:
+      - '8100:8100'
+    volumes:
+      - './config:/app/config'
+      - './world:/app/world'
+      - './data:/app/data'
+      - './web:/app/web'
+      - './world_nether:/app/world_nether'
+      - './world_the_end:/app/world_the_end'

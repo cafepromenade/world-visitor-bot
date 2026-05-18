@@ -6,7 +6,8 @@ services:
     stdin_open: true
     environment:
       EULA: "TRUE"
-      VERSION: "1.21.1"
+      TYPE: "PAPER"
+      VERSION: "26.1.2"
       ONLINE_MODE: "FALSE"
       VIEW_DISTANCE: "32"
       OPS: "${MC_USERNAME:-Bot}"
@@ -21,6 +22,7 @@ services:
       USE_AIKAR_FLAGS: "true"
       MAX_TICK_TIME: "-1"
       LEVEL: "world"
+      MODRINTH_PROJECTS: "viaversion,viabackwards"
     ports:
       - "${MC_PORT:-25566}:25565"
     volumes:
