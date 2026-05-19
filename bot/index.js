@@ -159,12 +159,14 @@ function delay(ms) {
 async function waitForChunksLoaded() {
   const start = Date.now();
   const step = Math.max(4, Math.floor(RENDER_DISTANCE / 4));
-  const pos = bot.entity.position;
-  const cx = Math.floor(pos.x / 16);
-  const cz = Math.floor(pos.z / 16);
 
   while (Date.now() - start < CHUNK_LOAD_TIMEOUT) {
-    await bot.waitForChunksToLoad();
+    await delay(500);
+    if (!bot.entity) return;
+
+    const pos = bot.entity.position;
+    const cx = Math.floor(pos.x / 16);
+    const cz = Math.floor(pos.z / 16);
 
     let allLoaded = true;
     for (let dx = -RENDER_DISTANCE; dx <= RENDER_DISTANCE && allLoaded; dx += step) {
@@ -176,7 +178,6 @@ async function waitForChunksLoaded() {
     }
 
     if (allLoaded) return;
-    await delay(1000);
   }
 
   log('WARN: Chunks not fully loaded after timeout');
@@ -268,7 +269,7 @@ async function processNext() {
     }
   } catch (err) {
     log(`Error in region (${target.rx},${target.rz}): ${err.message}`);
-    bot.chat(`Error: ${err.message}`);
+    try { bot.chat(`Error: ${err.message}`); } catch {}
     if (!bot.entity) return;
   }
 
