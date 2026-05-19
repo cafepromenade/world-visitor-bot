@@ -2,7 +2,7 @@ settings:
   moved-wrongly-threshold: 1000000
   moved-too-quickly-multiplier: 1000000
   bungeecord: false
-  timeout-time: 300
+  timeout-time: 900
   restart-on-crash: false
   restart-script: ''
   netty-threads: 4
