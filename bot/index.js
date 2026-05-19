@@ -23,7 +23,7 @@ const RENDER_DISTANCE = parseInt(process.env.RENDER_DISTANCE || '32');
 const GRID_STEP = parseInt(process.env.GRID_STEP || '80');
 const WP_DELAY = parseInt(process.env.WP_DELAY || '2000');
 const REGION_DELAY = parseInt(process.env.REGION_DELAY || '3000');
-const CHUNK_LOAD_TIMEOUT = parseInt(process.env.CHUNK_LOAD_TIMEOUT || '300000');
+const CHUNK_LOAD_TIMEOUT = parseInt(process.env.CHUNK_LOAD_TIMEOUT || '30000');
 const SHUTDOWN_ON_COMPLETE = process.env.SHUTDOWN_ON_COMPLETE === 'true';
 const FOLLOW_PLAYER = process.env.FOLLOW_PLAYER || '';
 
@@ -32,7 +32,6 @@ let todo = [];
 let idx = 0;
 let bot;
 let reconnectAttempts = 0;
-let shouldReconnect = false;
 
 function log(msg) {
   console.log(`[${new Date().toISOString()}] ${msg}`);
@@ -96,7 +95,6 @@ function onPlayerJoined(player) {
 function onSpawn() {
   log('Bot spawned. Starting flight mode...');
   reconnectAttempts = 0;
-  shouldReconnect = false;
   bot.chat(`/gamemode creative ${MC_USERNAME_FULL}`);
   if (FOLLOW_PLAYER) {
     bot.chat(`/op ${FOLLOW_PLAYER}`);
@@ -111,19 +109,15 @@ function onSpawn() {
 
 function onKicked(reason) {
   log(`Kicked: ${reason}`);
-  shouldReconnect = true;
 }
 
 function onError(err) {
   log(`Error: ${err.message}`);
-  if (err.code === 'ECONNRESET' || err.code === 'ECONNREFUSED' || err.code === 'ETIMEDOUT' || err.message.includes('socket hang up')) {
-    shouldReconnect = true;
-  }
 }
 
 function onEnd() {
   log('Connection ended');
-  if (idx < todo.length && shouldReconnect && reconnectAttempts < 10) {
+  if (idx < todo.length && reconnectAttempts < 10) {
     reconnectAttempts++;
     log(`Reconnecting in 10s... (attempt ${reconnectAttempts}/10)`);
     setTimeout(connect, 10000);
@@ -131,7 +125,7 @@ function onEnd() {
     log('All regions visited. Exiting.');
     process.exit(0);
   } else {
-    log('Max reconnect attempts reached or not reconnecting. Exiting.');
+    log('Max reconnect attempts reached. Exiting.');
     process.exit(1);
   }
 }
@@ -273,10 +267,8 @@ async function processNext() {
     }
   } catch (err) {
     log(`Error in region (${target.rx},${target.rz}): ${err.message}`);
-    if (err.code === 'ECONNRESET' || err.code === 'ECONNREFUSED' || err.code === 'ETIMEDOUT' || err.message.includes('socket hang up')) {
-      shouldReconnect = true;
-      return;
-    }
+    bot.end();
+    return;
   }
 
   idx++;
