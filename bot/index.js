@@ -205,10 +205,11 @@ async function flyRegion(target, index) {
     try {
       await Promise.race([
         bot.creative.flyTo(dest),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('flyTo timeout')), CHUNK_LOAD_TIMEOUT))
+        new Promise((_, reject) => setTimeout(() => reject(new Error('flyTo timeout')), 8000))
       ]);
     } catch {
       bot.chat(`/tp ${MC_USERNAME_FULL} ${wp.x} ${wp.y} ${wp.z}`);
+      await delay(500);
     }
 
     await waitForChunksLoaded();
@@ -267,8 +268,8 @@ async function processNext() {
     }
   } catch (err) {
     log(`Error in region (${target.rx},${target.rz}): ${err.message}`);
-    bot.end();
-    return;
+    bot.chat(`Error: ${err.message}`);
+    if (!bot.entity) return;
   }
 
   idx++;
