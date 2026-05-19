@@ -1,7 +1,6 @@
 const mineflayer = require('mineflayer');
 const path = require('path');
 const fs = require('fs');
-const { Vec3 } = require('vec3');
 const regions = require('./regions');
 
 const WORLD_DIR = process.env.WORLD_DIR || '/app/world';
@@ -23,7 +22,7 @@ const RENDER_DISTANCE = parseInt(process.env.RENDER_DISTANCE || '32');
 const GRID_STEP = parseInt(process.env.GRID_STEP || '80');
 const WP_DELAY = parseInt(process.env.WP_DELAY || '2000');
 const REGION_DELAY = parseInt(process.env.REGION_DELAY || '3000');
-const CHUNK_LOAD_TIMEOUT = parseInt(process.env.CHUNK_LOAD_TIMEOUT || '30000');
+const CHUNK_LOAD_TIMEOUT = parseInt(process.env.CHUNK_LOAD_TIMEOUT || '60000');
 const SHUTDOWN_ON_COMPLETE = process.env.SHUTDOWN_ON_COMPLETE === 'true';
 const FOLLOW_PLAYER = process.env.FOLLOW_PLAYER || '';
 
@@ -31,15 +30,20 @@ let state;
 let todo = [];
 let idx = 0;
 let bot;
+let activeConnection = 0;
 let reconnectAttempts = 0;
 
 function log(msg) {
   console.log(`[${new Date().toISOString()}] ${msg}`);
 }
 
+function chat(msg) {
+  if (!bot || !bot.entity) return;
+  try { bot.chat(msg); } catch {}
+}
+
 function init() {
   let allRegions = regions.getAllRegions(WORLD_DIR);
-  // filter: each bot gets every Nth region
   allRegions = allRegions.filter((_, i) => i % BOT_COUNT === BOT_INDEX);
   log(`Found ${allRegions.length} regions assigned to bot ${BOT_INDEX}/${BOT_COUNT}`);
 
@@ -62,6 +66,7 @@ function init() {
 }
 
 function connect() {
+  const myConn = ++activeConnection;
   bot = mineflayer.createBot({
     host: MC_HOST,
     port: MC_PORT,
@@ -70,7 +75,7 @@ function connect() {
     viewDistance: RENDER_DISTANCE
   });
 
-  bot.once('spawn', onSpawn);
+  bot.once('spawn', () => onSpawn(myConn));
   bot.on('kicked', onKicked);
   bot.on('error', onError);
   bot.on('end', onEnd);
@@ -81,29 +86,31 @@ function connect() {
 function onHealth() {
   if (bot.health < 20) {
     log(`WARN: took damage! Health: ${bot.health}  Food: ${bot.food}  Position: ${bot.entity.position}`);
-    bot.chat(`/effect give ${MC_USERNAME_FULL} minecraft:instant_health 1 5`);
-    bot.chat(`/effect give ${MC_USERNAME_FULL} minecraft:resistance 9999 5 true`);
+    chat(`/effect give ${MC_USERNAME_FULL} minecraft:instant_health 1 5`);
+    chat(`/effect give ${MC_USERNAME_FULL} minecraft:resistance 9999 5 true`);
   }
 }
 
 function onPlayerJoined(player) {
   if (player.username === MC_USERNAME_FULL) return;
   log(`Player joined: ${player.username} - granting OP`);
-  bot.chat(`/op ${player.username}`);
+  chat(`/op ${player.username}`);
 }
 
-function onSpawn() {
+function onSpawn(connId) {
+  if (connId !== activeConnection) return;
   log('Bot spawned. Starting flight mode...');
   reconnectAttempts = 0;
-  bot.chat(`/gamemode creative ${MC_USERNAME_FULL}`);
+  chat(`/gamemode creative ${MC_USERNAME_FULL}`);
   if (FOLLOW_PLAYER) {
-    bot.chat(`/op ${FOLLOW_PLAYER}`);
+    chat(`/op ${FOLLOW_PLAYER}`);
     log(`OP'd follow player: ${FOLLOW_PLAYER}`);
   }
   setTimeout(() => {
+    if (connId !== activeConnection) return;
     bot.creative.startFlying();
     log('Flying enabled. Starting region visits in 3s...');
-    setTimeout(processNext, 3000);
+    setTimeout(() => processNext(connId), 3000);
   }, 2000);
 }
 
@@ -156,12 +163,12 @@ function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function waitForChunksLoaded() {
+async function waitForChunksLoaded(connId) {
   const start = Date.now();
   const step = Math.max(4, Math.floor(RENDER_DISTANCE / 4));
 
   while (Date.now() - start < CHUNK_LOAD_TIMEOUT) {
-    await delay(500);
+    if (connId !== activeConnection) return;
     if (!bot.entity) return;
 
     const pos = bot.entity.position;
@@ -178,12 +185,13 @@ async function waitForChunksLoaded() {
     }
 
     if (allLoaded) return;
+    await delay(500);
   }
 
   log('WARN: Chunks not fully loaded after timeout');
 }
 
-async function flyRegion(target, index) {
+async function flyRegion(connId, target, index) {
   const regionSize = 512;
   const half = regionSize / 2;
   const waypoints = buildFlightGrid(target.cx, target.cz, half);
@@ -192,28 +200,21 @@ async function flyRegion(target, index) {
   log(`[${index}/${todo.length}] Region (${target.rx}, ${target.rz}) @ (${target.cx}, ${FLY_Y}, ${target.cz}) - ${waypoints.length} waypoints`);
 
   for (let i = 0; i < waypoints.length; i++) {
+    if (connId !== activeConnection) return;
     const wp = waypoints[i];
-    const dest = new Vec3(wp.x, wp.y, wp.z);
 
-    // tp follow player if set
     const followFile = path.join(STATE_DIR, 'follow_player.txt');
     let followPlayer = FOLLOW_PLAYER;
     try { const f = fs.readFileSync(followFile, 'utf8').trim(); if (f) followPlayer = f; } catch {}
     if (followPlayer) {
-      bot.chat(`/tp ${followPlayer} ${wp.x} ${wp.y + 5} ${wp.z}`);
+      chat(`/tp ${followPlayer} ${wp.x} ${wp.y + 5} ${wp.z}`);
     }
 
-    try {
-      await Promise.race([
-        bot.creative.flyTo(dest),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('flyTo timeout')), 8000))
-      ]);
-    } catch {
-      bot.chat(`/tp ${MC_USERNAME_FULL} ${wp.x} ${wp.y} ${wp.z}`);
-      await delay(500);
-    }
+    chat(`/tp ${MC_USERNAME_FULL} ${wp.x} ${wp.y} ${wp.z}`);
+    await delay(500);
 
-    await waitForChunksLoaded();
+    await waitForChunksLoaded(connId);
+    if (connId !== activeConnection) return;
 
     if (i % 3 === 0) {
       log(`[${index}/${todo.length}]   waypoint ${i + 1}/${waypoints.length} @ (${wp.x}, ${FLY_Y}, ${wp.z})`);
@@ -228,7 +229,9 @@ async function flyRegion(target, index) {
   log(`[${index}/${todo.length}] Region (${target.rx}, ${target.rz}) complete in ${elapsed}s`);
 }
 
-async function processNext() {
+async function processNext(connId) {
+  if (connId !== activeConnection) return;
+
   if (idx >= todo.length) {
     log('All regions visited! Saving state...');
     regions.saveState(STATE_FILE, state);
@@ -236,7 +239,7 @@ async function processNext() {
     if (SHUTDOWN_ON_COMPLETE) {
       log('Shutting down server in 10s...');
       await delay(10000);
-      bot.chat('/stop');
+      chat('/stop');
     }
     await delay(3000);
     bot.end();
@@ -251,15 +254,17 @@ async function processNext() {
   if (state.visited && state.visited[key]) {
     log(`[${current}/${todo.length}] Already visited (${target.rx},${target.rz}) - skipping`);
     idx++;
-    processNext();
+    processNext(connId);
     return;
   }
 
   try {
-    bot.chat(`/tp ${MC_USERNAME_FULL} ${target.cx} ${FLY_Y} ${target.cz}`);
+    chat(`/tp ${MC_USERNAME_FULL} ${target.cx} ${FLY_Y} ${target.cz}`);
     await delay(REGION_DELAY);
+    if (connId !== activeConnection) return;
 
-    await flyRegion(target, current);
+    await flyRegion(connId, target, current);
+    if (connId !== activeConnection) return;
 
     regions.markVisited(state, target.rx, target.rz);
 
@@ -269,12 +274,12 @@ async function processNext() {
     }
   } catch (err) {
     log(`Error in region (${target.rx},${target.rz}): ${err.message}`);
-    try { bot.chat(`Error: ${err.message}`); } catch {}
+    try { chat(`Error: ${err.message}`); } catch {}
     if (!bot.entity) return;
   }
 
   idx++;
-  processNext();
+  processNext(connId);
 }
 
 init();
