@@ -8,7 +8,7 @@ const path = require('path');
 const net = require('net');
 const crypto = require('crypto');
 
-const PROJECT_DIR = process.env.PROJECT_DIR || '/app/project';
+const PROJECT_DIR = process.env.PROJECT_DIR || path.resolve(__dirname, '..');
 const PORT = parseInt(process.env.PORT || '80');
 const PORT2 = parseInt(process.env.PORT2 || '3000');
 const DOMAIN = process.env.DOMAIN || 'bigheados.com';
@@ -34,6 +34,7 @@ const BUG_WATCHER_ENABLED = envFlag('BUG_WATCHER_ENABLED', true);
 const BUG_WATCHER_INTERVAL_MS = Math.max(30000, parseInt(process.env.BUG_WATCHER_INTERVAL_MS || '60000', 10) || 60000);
 const BUG_WATCHER_TREAT_WARNINGS = envFlag('BUG_WATCHER_TREAT_WARNINGS_AS_ERRORS', true);
 const BUG_WATCHER_MAX_ATTEMPTS = Math.max(1, parseInt(process.env.BUG_WATCHER_MAX_ATTEMPTS || '5', 10) || 5);
+const BUG_WATCHER_RETRY_DELAY_MS = Math.max(60000, parseInt(process.env.BUG_WATCHER_RETRY_DELAY_MS || '1800000', 10) || 1800000);
 const OPENCODE_AUTOFIX = envFlag('OPENCODE_AUTOFIX', true);
 const OPENCODE_SKIP_PERMISSIONS = envFlag('OPENCODE_SKIP_PERMISSIONS', true);
 const OPENCODE_ALLOW_SUDO = envFlag('OPENCODE_ALLOW_SUDO', true);
@@ -54,6 +55,7 @@ let HOST_PROJECT_DIR = process.env.HOST_PROJECT_DIR || '';
 let bugWatcherState = { queue: [], reports: [], completed: [], current: null, lastCheckAt: '', lastCheckLog: '', baseBranch: '' };
 let bugWatcherRunning = false;
 let bugAutoMergeRunning = false;
+let bugWatcherWritable = true;
 
 function getLocalIP() {
   const provided = process.env.HOST_IP;
@@ -361,6 +363,7 @@ function normalizeBugState() {
       updateReportsForTask(bugWatcherState.current, 'failed', { finishedAt: nowIso() });
     } else {
       bugWatcherState.current.status = 'retry';
+      bugWatcherState.current.nextRetryAt = new Date(Date.now() + BUG_WATCHER_RETRY_DELAY_MS).toISOString();
       bugWatcherState.queue.unshift(bugWatcherState.current);
     }
     bugWatcherState.current = null;
@@ -374,6 +377,24 @@ function normalizeBugState() {
   });
   bugWatcherState.completed = bugWatcherState.completed.slice(-100);
   bugWatcherState.current = bugWatcherState.current || null;
+}
+
+function retryDueMs(task) {
+  if (!task?.nextRetryAt) return 0;
+  return Math.max(0, Date.parse(task.nextRetryAt) - Date.now());
+}
+
+function isBugTaskRunnable(task) {
+  if (!task) return false;
+  if (task.status === 'queued') return true;
+  if (task.status !== 'retry') return false;
+  return retryDueMs(task) <= 0;
+}
+
+function scheduleBugTaskRetry(task) {
+  task.status = 'retry';
+  task.nextRetryAt = new Date(Date.now() + BUG_WATCHER_RETRY_DELAY_MS).toISOString();
+  task.updatedAt = nowIso();
 }
 
 function relatedTaskKey(task) {
@@ -410,7 +431,7 @@ function severityRank(severity) {
 }
 
 function mergeQueuedTasksIntoBatch() {
-  const candidates = bugWatcherState.queue.filter(t => t && ['queued', 'retry'].includes(t.status) && t.source !== 'health-check');
+  const candidates = bugWatcherState.queue.filter(t => t && isBugTaskRunnable(t) && t.source !== 'health-check');
   if (candidates.length <= 1) return;
   let batch = candidates.find(t => t.source === 'batch');
   const now = nowIso();
@@ -422,11 +443,13 @@ function mergeQueuedTasksIntoBatch() {
     batch.signature = `batch:${Date.now()}:${hashText(candidates.map(t => t.id).join('|')).slice(0, 8)}`;
     batch.branch = `autofix/batch-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${hashText(candidates.map(t => t.branch).join('|')).slice(0, 8)}`;
     batch.status = 'queued';
-    batch.attempts = 0;
   }
   const merged = [batch, ...candidates.filter(t => t.id !== batch.id)];
   batch.title = `Batch: ${merged.length} queued fixes`;
   batch.severity = merged.reduce((max, t) => severityRank(t.severity) > severityRank(max) ? t.severity : max, batch.severity || 'feature');
+  batch.status = 'queued';
+  batch.attempts = Math.max(0, ...merged.map(t => t.attempts || 0));
+  delete batch.nextRetryAt;
   batch.reportIds = [...new Set(merged.flatMap(t => t.reportIds || []))];
   batch.details = merged.map(t => [
     `Task ${t.id}: ${t.title}`,
@@ -477,8 +500,8 @@ function enrichTaskEstimate(task, queueIndex = -1, currentRemaining = 0, avgMs =
     estimate.estimatedResolvedAt = new Date(Date.now() + remaining).toISOString();
     estimate.estimatedSeconds = Math.round(remaining / 1000);
   } else if (queueIndex >= 0) {
-    const startIn = currentRemaining + avgMs * queueIndex;
-    const resolvedIn = currentRemaining + avgMs * (queueIndex + 1);
+    const startIn = Math.max(currentRemaining + avgMs * queueIndex, retryDueMs(task));
+    const resolvedIn = startIn + avgMs;
     estimate.estimatedStartAt = new Date(Date.now() + startIn).toISOString();
     estimate.estimatedResolvedAt = new Date(Date.now() + resolvedIn).toISOString();
     estimate.estimatedSeconds = Math.round(resolvedIn / 1000);
@@ -487,15 +510,26 @@ function enrichTaskEstimate(task, queueIndex = -1, currentRemaining = 0, avgMs =
 }
 
 function saveBugWatcherState() {
-  ensureDir(bugWatcherDir);
-  writeJson(bugStatePath, bugWatcherState);
+  if (!bugWatcherWritable) return;
+  try {
+    ensureDir(bugWatcherDir);
+    writeJson(bugStatePath, bugWatcherState);
+  } catch (err) {
+    bugWatcherWritable = false;
+    console.error(`[bug-watcher] storage unavailable: ${err.message}`);
+  }
 }
 
 function initBugWatcherState() {
-  [logsDir, bugWatcherDir, bugReportsDir, bugSessionsDir, bugWorktreesDir].forEach(ensureDir);
-  bugWatcherState = readJson(bugStatePath, bugWatcherState);
-  normalizeBugState();
-  saveBugWatcherState();
+  try {
+    [logsDir, bugWatcherDir, bugReportsDir, bugSessionsDir, bugWorktreesDir].forEach(ensureDir);
+    bugWatcherState = readJson(bugStatePath, bugWatcherState);
+    normalizeBugState();
+    saveBugWatcherState();
+  } catch (err) {
+    bugWatcherWritable = false;
+    console.error(`[bug-watcher] storage unavailable: ${err.message}`);
+  }
 }
 
 function publicBugTask(task, estimate = {}) {
@@ -520,6 +554,8 @@ function publicBugTask(task, estimate = {}) {
     mergeRejected: Boolean(task.mergeRejected),
     startedAt: task.startedAt || '',
     finishedAt: task.finishedAt || '',
+    nextRetryAt: task.nextRetryAt || '',
+    retryInMs: retryDueMs(task),
     elapsedMs: estimate.elapsedMs || taskElapsedMs(task),
     estimatedStartAt: estimate.estimatedStartAt || '',
     estimatedResolvedAt: estimate.estimatedResolvedAt || '',
@@ -549,6 +585,7 @@ function publicBugReport(report, task = findAnyTaskById(report?.taskId)) {
     summary: report.summary || '',
     mergeStatus: report.mergeStatus || '',
     mergeAfter: report.mergeAfter || '',
+    nextRetryAt: report.nextRetryAt || '',
     mergedAt: report.mergedAt || '',
     mergeRejected: Boolean(report.mergeRejected),
     elapsedMs: estimate.elapsedMs || 0,
@@ -576,6 +613,9 @@ function getBugWatcherPublicStatus() {
     autoMergeMs: BUG_WATCHER_AUTO_MERGE_MS,
     mergeBranch: BUG_WATCHER_MERGE_BRANCH,
     maxAttempts: BUG_WATCHER_MAX_ATTEMPTS,
+    retryDelayMs: BUG_WATCHER_RETRY_DELAY_MS,
+    processor: 'opencode --prompt',
+    storageWritable: bugWatcherWritable,
     skipPermissions: OPENCODE_SKIP_PERMISSIONS,
     sudo: OPENCODE_ALLOW_SUDO,
     treatWarningsAsErrors: BUG_WATCHER_TREAT_WARNINGS,
@@ -642,8 +682,14 @@ function attachFeedbackToTask(task, report, comment) {
 }
 
 function saveBugReport(report) {
-  ensureDir(bugReportsDir);
-  writeJson(path.join(bugReportsDir, `${report.id}.json`), report);
+  if (!bugWatcherWritable) return;
+  try {
+    ensureDir(bugReportsDir);
+    writeJson(path.join(bugReportsDir, `${report.id}.json`), report);
+  } catch (err) {
+    bugWatcherWritable = false;
+    console.error(`[bug-watcher] report storage unavailable: ${err.message}`);
+  }
 }
 
 function updateReport(reportId, updates) {
@@ -1320,7 +1366,7 @@ async function rebuildSiteAfterFix(task, logFile) {
 async function processNextBugTask(ios) {
   if (bugWatcherRunning || !BUG_WATCHER_ENABLED || !OPENCODE_AUTOFIX) return;
   dedupeBugQueue();
-  const task = bugWatcherState.queue.find(t => t.status === 'queued' || t.status === 'retry');
+  const task = bugWatcherState.queue.find(isBugTaskRunnable);
   if (!task) return;
   bugWatcherRunning = true;
   bugWatcherState.queue = bugWatcherState.queue.filter(t => t.id !== task.id);
@@ -1335,6 +1381,7 @@ async function processNextBugTask(ios) {
   }
   task.status = 'running';
   task.attempts = (task.attempts || 0) + 1;
+  delete task.nextRetryAt;
   task.startedAt = task.startedAt || nowIso();
   task.updatedAt = nowIso();
   task.sessionLog = path.join(bugSessionsDir, `${task.id}-attempt-${task.attempts}-${sessionStamp()}.log`);
@@ -1360,9 +1407,8 @@ async function processNextBugTask(ios) {
     await installMissingDependencies();
     const { worktree, baseBranch } = await ensureBugWorktree(task, task.sessionLog);
     const prompt = buildAutofixPrompt(task, baseBranch);
-    const args = ['run', '--dir', worktree, '--title', task.title];
+    const args = ['--prompt', prompt];
     if (OPENCODE_SKIP_PERMISSIONS) args.push('--dangerously-skip-permissions');
-    args.push(prompt);
     await spawnLogged(resolveOpenCodeCommand(), args, { cwd: worktree, logFile: task.sessionLog, timeout: OPENCODE_TIMEOUT_MS, env: { ...process.env, BUG_WATCHER_TASK_ID: task.id } });
     const checks = await runBugChecks(worktree, task.sessionLog);
     const fix = summarizeFix(task, checks);
@@ -1388,11 +1434,12 @@ async function processNextBugTask(ios) {
       await rebuildSiteAfterFix(task, task.sessionLog);
       elog(ios, `Bug watcher fixed: ${task.title}`, 'done');
     } else if (task.attempts < BUG_WATCHER_MAX_ATTEMPTS) {
-      task.status = 'retry';
+      scheduleBugTaskRetry(task);
       task.details = `${task.details}\n\nRetry needed after attempt ${task.attempts}:\n${checks.failed.map(c => `${c.name}: ${c.output.slice(-1200)}`).join('\n\n')}`.slice(-12000);
-      updateReportsForTask(task, 'processing', { summary: task.summary });
+      task.summary = `${task.summary} Retrying in ${Math.round(BUG_WATCHER_RETRY_DELAY_MS / 60000)} minutes.`;
+      updateReportsForTask(task, 'processing', { summary: task.summary, nextRetryAt: task.nextRetryAt });
       bugWatcherState.queue.push(task);
-      elog(ios, `Bug watcher queued retry: ${task.title}`, 'warn');
+      elog(ios, `Bug watcher queued retry in ${Math.round(BUG_WATCHER_RETRY_DELAY_MS / 60000)} minutes: ${task.title}`, 'warn');
     } else {
       task.status = 'failed';
       task.finishedAt = nowIso();
@@ -1404,8 +1451,9 @@ async function processNextBugTask(ios) {
   } catch (err) {
     task.status = task.attempts < BUG_WATCHER_MAX_ATTEMPTS ? 'retry' : 'failed';
     task.summary = `Watcher error: ${err.message}`;
+    if (task.status === 'retry') scheduleBugTaskRetry(task);
     if (task.status === 'failed') task.finishedAt = nowIso();
-    updateReportsForTask(task, task.status === 'retry' ? 'processing' : 'failed', task.status === 'failed' ? { finishedAt: task.finishedAt } : {});
+    updateReportsForTask(task, task.status === 'retry' ? 'processing' : 'failed', task.status === 'failed' ? { finishedAt: task.finishedAt } : { nextRetryAt: task.nextRetryAt });
     if (task.status === 'retry') bugWatcherState.queue.push(task);
     else completeBugTask(task, 'failed');
     elog(ios, `Bug watcher error: ${err.message}`, 'error');
@@ -1903,7 +1951,8 @@ function mountRoutes(app, ios) {
 
 async function main() {
   await resolveHostProjectDir();
-  initBugWatcherState();
+  if (BUG_WATCHER_ENABLED) initBugWatcherState();
+  else normalizeBugState();
   const s1 = setupServer(PORT), s2 = setupServer(PORT2);
   const ios = [s1.io, s2.io];
   mountRoutes(s1.app, ios); mountRoutes(s2.app, ios);
@@ -1933,7 +1982,7 @@ async function main() {
     } catch {}
   }, 4000);
 
-  if (BUG_WATCHER_ENABLED) {
+  if (BUG_WATCHER_ENABLED && bugWatcherWritable) {
     installMissingDependencies().catch(err => console.error('[bug-watcher] dependency install failed:', err.message));
     setTimeout(async () => {
       try { await queueBugCheckFailures(); await processNextBugTask(ios); await processAutoMerges(ios); }
