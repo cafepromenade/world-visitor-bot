@@ -338,6 +338,18 @@ async function main() {
     await pushAll(s2.io, true);
   }, 4000);
 
+  console.log('[timer] starting compose log streaming (every 5s)');
+  setInterval(async () => {
+    try {
+      const mc = await run(`docker compose --project-directory ${PROJECT_DIR} logs mc --tail 5 --since 5s 2>/dev/null`, true);
+      if (mc.stdout.trim()) for (const line of mc.stdout.trim().split('\n')) mclog(s1.io, line.slice(0, 500), 'm');
+    } catch {}
+    try {
+      const bm = await run(`docker compose --project-directory ${PROJECT_DIR} logs bluemap --tail 5 --since 5s 2>/dev/null`, true);
+      if (bm.stdout.trim()) for (const line of bm.stdout.trim().split('\n')) bmlog(s1.io, line.slice(0, 500), 'm');
+    } catch {}
+  }, 5000);
+
   s1.server.listen(PORT, () => console.log(`Panel: http://0.0.0.0:${PORT} (IP: ${LOCAL_IP})`));
   s2.server.listen(PORT2, () => console.log(`Panel: http://0.0.0.0:${PORT2} (IP: ${LOCAL_IP})`));
 }
