@@ -1045,6 +1045,25 @@ async function createOrUpdatePullRequest(task, worktree, baseBranch, logFile) {
   return prUrl;
 }
 
+async function rebuildSiteAfterFix(task, logFile) {
+  const env = {
+    ...process.env,
+    HOST_PROJECT_DIR: HOST_PROJECT_DIR || PROJECT_DIR,
+    COMPOSE_PROJECT_NAME: COMPOSE_PROJECT,
+    HOST_IP: LOCAL_IP
+  };
+  task.siteRestartStartedAt = nowIso();
+  updateReportsForTask(task, 'finished', { summary: `${task.summary || ''} Site rebuild/restart started.`.trim() });
+  saveBugWatcherState();
+  appendSession(logFile, '\n[site] rebuilding control image after automated fix\n');
+  await runShellLogged('docker compose -f compose.web.yml build control', { cwd: PROJECT_DIR, env, timeout: 600000, logFile });
+  appendSession(logFile, '\n[site] restarting control container after automated fix\n');
+  await runShellLogged('docker compose -f compose.web.yml up -d control', { cwd: PROJECT_DIR, env, timeout: 300000, logFile });
+  task.siteRestartedAt = nowIso();
+  updateReportsForTask(task, 'finished', { summary: `${task.summary || ''} Site rebuild/restart completed.`.trim() });
+  saveBugWatcherState();
+}
+
 async function processNextBugTask(ios) {
   if (bugWatcherRunning || !BUG_WATCHER_ENABLED || !OPENCODE_AUTOFIX) return;
   const task = bugWatcherState.queue.find(t => t.status === 'queued' || t.status === 'retry');
@@ -1100,6 +1119,7 @@ async function processNextBugTask(ios) {
       }
       task.status = 'completed';
       updateReportsForTask(task, 'finished', { finishedAt: nowIso() });
+      await rebuildSiteAfterFix(task, task.sessionLog);
       elog(ios, `Bug watcher fixed: ${task.title}`, 'done');
     } else if (task.attempts < BUG_WATCHER_MAX_ATTEMPTS) {
       task.status = 'retry';

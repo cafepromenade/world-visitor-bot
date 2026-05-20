@@ -10,6 +10,7 @@
       "Report Bugs modal queues automated repair tasks and only asks once for IPv4 collection consent",
       "Users can add public comments to bug reports after submission",
       "Checker queues related improvements from user feedback comments automatically",
+      "After every automated fix, the checker rebuilds the control image and restarts the site container",
       "Bug watcher stores reports and sessions in logs/bug-watcher",
       "Reports are auto-approved, updated while processing, and finished with public comments, cause, summary, branch, session log, and PR URL",
       "Each unrelated error gets an autofix branch while related errors share a signature",
@@ -18,7 +19,7 @@
     ],
     "comments": [
       "How it went: the control panel gained a public request lifecycle so submitted reports no longer disappear after queuing.",
-      "How it should improve: future watcher runs should add regression checks for repeated signatures, keep comments synced to pull requests, and use user feedback comments as follow-up requirements."
+      "How it should improve: future watcher runs should add regression checks for repeated signatures, keep comments synced to pull requests, use user feedback comments as follow-up requirements, and always refresh the running site after a fix."
     ],
     "branch": "feature/auto-bug-watcher",
     "prUrl": ""
