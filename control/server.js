@@ -5,6 +5,7 @@ const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const net = require('net');
+const os = require('os');
 
 const PROJECT_HOST_DIR = process.env.PROJECT_HOST_DIR || '/home/docker/world-visitor-bot';
 const PROJECT_DIR = process.env.PROJECT_DIR || '/app/project';
@@ -20,9 +21,31 @@ const RCON_PASS = 'visitor';
 const envPath = path.join(PROJECT_DIR, '.env');
 const stateDir = path.join(PROJECT_DIR, 'state');
 
+function getLocalIP() {
+  const ifaces = os.networkInterfaces();
+  for (const name of Object.keys(ifaces)) {
+    for (const iface of ifaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) return iface.address;
+    }
+  }
+  return 'localhost';
+}
+
+const LOCAL_IP = getLocalIP();
+
+function getConnectionInfo() {
+  return {
+    primary: DOMAIN,
+    fallback: LOCAL_IP,
+    port: MC_PORT,
+    bluemapUrl: `http://${DOMAIN}:${BLUEMAP_PORT}`,
+    bluemapFallback: `http://${LOCAL_IP}:${BLUEMAP_PORT}`,
+  };
+}
+
 function compose(args) {
   return new Promise((resolve) => {
-    exec(`docker compose --project-directory ${PROJECT_HOST_DIR} ${args}`, { timeout: 180000, maxBuffer: 1024*1024*10 }, (err, stdout, stderr) => {
+    exec(`docker compose --project-directory ${PROJECT_HOST_DIR} ${args}`, { timeout: 180000, maxBuffer: 1024 * 1024 * 10 }, (err, stdout, stderr) => {
       resolve({ ok: !err, stdout: stdout || '', stderr: stderr || '' });
     });
   });
@@ -116,8 +139,9 @@ function writeEnv(settings) {
   fs.writeFileSync(envPath, lines.join('\n'));
   if (settings.stateData) {
     const file = path.join(stateDir, 'visited.json');
-    const existing = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {};
-    const merged = { ...existing, visited: { ...existing.visited, ...settings.stateData } };
+    let existing = {};
+    try { if (fs.existsSync(file)) existing = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
+    const merged = { ...existing, visited: { ...(existing.visited || {}), ...settings.stateData } };
     if (!fs.existsSync(stateDir)) fs.mkdirSync(stateDir, { recursive: true });
     fs.writeFileSync(file, JSON.stringify(merged, null, 2));
   }
@@ -134,8 +158,6 @@ async function rcon(cmd) {
       if (buf.length >= 14) {
         const len = buf.readInt32LE(0);
         if (buf.length >= 4 + len) {
-          const id = buf.readInt32LE(4);
-          const type = buf.readInt32LE(8);
           const payload = buf.slice(12, 4 + len - 2).toString('utf8');
           client.destroy();
           resolve(payload || '(empty)');
@@ -145,34 +167,57 @@ async function rcon(cmd) {
     client.on('error', () => { resolve('RCON connection failed'); });
     client.on('close', () => { resolve('RCON closed'); });
     setTimeout(() => { client.destroy(); resolve('RCON timeout'); }, 5000);
-    const authPkt = createRconPacket(0, 3, RCON_PASS);
-    const cmdPkt = createRconPacket(0, 2, cmd);
-    client.write(authPkt);
-    setTimeout(() => { client.write(cmdPkt); }, 100);
+    client.write(createRconPacket(0, 3, RCON_PASS));
+    setTimeout(() => { client.write(createRconPacket(0, 2, cmd)); }, 100);
   });
 }
 
 function createRconPacket(id, type, body) {
   const buf = Buffer.alloc(14 + body.length + 1);
-  let offset = 0;
-  buf.writeInt32LE(10 + body.length, offset); offset += 4;
-  buf.writeInt32LE(id, offset); offset += 4;
-  buf.writeInt32LE(type, offset); offset += 4;
-  buf.write(body, offset, body.length, 'utf8'); offset += body.length;
-  buf.writeInt8(0, offset); offset += 1;
-  buf.writeInt8(0, offset);
+  let off = 0;
+  buf.writeInt32LE(10 + body.length, off); off += 4;
+  buf.writeInt32LE(id, off); off += 4;
+  buf.writeInt32LE(type, off); off += 4;
+  buf.write(body, off, body.length, 'utf8'); off += body.length;
+  buf.writeInt8(0, off); off += 1;
+  buf.writeInt8(0, off);
   return buf;
 }
 
 function log(io, msg, level) { io.emit('log', { msg, level }); }
-function mclog(io, msg, level) { io.emit('mclog', { msg, level }); }
-function bmlog(io, msg, level) { io.emit('bmlog', { msg, level }); }
 
 async function buildImage(io) {
-  log(io, 'Building bot image...', 'info');
+  log(io, 'Building bot Docker image...', 'info');
   const r = await compose('build visitor');
   log(io, r.ok ? 'Build complete' : 'Build FAILED: ' + (r.stderr || r.stdout).slice(-300), r.ok ? 'done' : 'error');
   return r.ok;
+}
+
+async function doPrune(io) {
+  log(io, 'Prune: checking running containers...', 'info');
+  io.emit('prune-step', { step: 1, total: 4, msg: 'Checking containers...' });
+  const status = await getStatus();
+  const running = Object.entries(status).filter(([,s]) => s === 'running');
+
+  if (running.length > 0) {
+    io.emit('prune-step', { step: 2, total: 4, msg: 'Stopping ' + running.map(([k]) => k).join(', ') + '...' });
+    log(io, 'Stopping containers: ' + running.map(([k]) => k).join(', '), 'info');
+    try { await compose('stop ' + running.map(([k]) => k).join(' ')); } catch {}
+  }
+
+  io.emit('prune-step', { step: 3, total: 4, msg: 'Removing containers...' });
+  log(io, 'Removing containers...', 'info');
+  try { await compose('down ' + Object.keys(status).join(' ') + ' 2>/dev/null'); } catch {}
+
+  io.emit('prune-step', { step: 4, total: 4, msg: 'Rebuilding bot image...' });
+  await buildImage(io);
+
+  io.emit('prune-step', { step: 5, total: 5, msg: 'Starting all services...' });
+  log(io, 'Starting fresh containers...', 'info');
+  const r = await compose('up -d mc visitor bluemap');
+
+  io.emit('prune-done', { ok: r.ok });
+  log(io, r.ok ? 'Prune complete — all services restarted' : 'Prune failed: ' + (r.stderr || '').slice(-200), r.ok ? 'done' : 'error');
 }
 
 async function doAction(io, cmd) {
@@ -181,24 +226,18 @@ async function doAction(io, cmd) {
     log(io, '$ ' + mcCmd, 'info');
     const result = await rcon(mcCmd);
     io.emit('cmd-result', result);
-    log(io, result, 'm');
+    log(io, result.slice(0, 300), 'm');
     return;
   }
 
-  log(io, '[cmd] ' + cmd, 'info');
+  log(io, '> ' + cmd, 'info');
   let r;
   switch (cmd) {
-    case 'start-all': r = await compose('up -d mc visitor bluemap'); log(io, r.ok ? 'All started' : 'Failed: ' + (r.stderr || '').slice(-200), r.ok ? 'done' : 'error'); break;
-    case 'stop-all': r = await compose('stop mc visitor bluemap'); log(io, 'All stopped', 'done'); break;
-    case 'prune':
-      log(io, 'Stopping containers...', 'info');
-      await compose('down mc visitor bluemap 2>/dev/null');
-      await buildImage(io);
-      r = await compose('up -d mc visitor bluemap');
-      log(io, r.ok ? 'Prune complete' : 'Failed', r.ok ? 'done' : 'error');
-      break;
-    case 'start-mc': r = await compose('up -d --no-deps mc'); log(io, 'MC starting...', 'info'); break;
-    case 'stop-mc': r = await compose('stop mc'); log(io, 'MC stopped', 'done'); break;
+    case 'start-all': r = await compose('up -d mc visitor bluemap'); log(io, r.ok ? 'All services started' : 'Failed: ' + (r.stderr || '').slice(-200), r.ok ? 'done' : 'error'); break;
+    case 'stop-all': r = await compose('stop mc visitor bluemap'); log(io, 'All services stopped', 'done'); break;
+    case 'prune': await doPrune(io); return;
+    case 'start-mc': r = await compose('up -d --no-deps mc'); log(io, 'MC server starting...', 'info'); break;
+    case 'stop-mc': r = await compose('stop mc'); log(io, 'MC server stopped', 'done'); break;
     case 'start-visitor': await buildImage(io); r = await compose('up -d --no-deps visitor'); log(io, 'Visitor starting...', 'info'); break;
     case 'stop-visitor': r = await compose('stop visitor'); log(io, 'Visitor stopped', 'done'); break;
     case 'start-bluemap': r = await compose('up -d --no-deps bluemap'); log(io, 'BlueMap started', 'done'); break;
@@ -211,10 +250,7 @@ async function doAction(io, cmd) {
 
 async function pushAll(io) {
   const [status, progress, stats] = await Promise.all([getStatus(), Promise.resolve(getProgress()), getStats()]);
-  io.emit('status', {
-    ...status, progress, stats,
-    conn: { host: DOMAIN, port: MC_PORT, bluemapUrl: `http://${DOMAIN}:${BLUEMAP_PORT}` }
-  });
+  io.emit('status', { ...status, progress, stats, conn: getConnectionInfo() });
 }
 
 function setupServer(p) {
@@ -224,34 +260,40 @@ function setupServer(p) {
   return { app, server, io: new Server(server, { maxHttpBufferSize: 1e7 }) };
 }
 
-async function main() {
-  const s1 = setupServer(PORT);
-  const s2 = setupServer(PORT2);
+function mountRoutes(app, io) {
+  app.use(express.static(path.join(__dirname, 'public')));
 
-  s1.app.use(express.static(path.join(__dirname, 'public')));
-  s2.app.use(express.static(path.join(__dirname, 'public')));
+  app.get('/api/env', (req, res) => res.json(readEnv()));
 
-  s1.app.get('/api/env', (req, res) => res.json(readEnv()));
-
-  s1.app.get('/api/states', (req, res) => {
+  app.get('/api/states', (req, res) => {
     const states = {};
     try {
       if (fs.existsSync(stateDir)) {
         for (const f of fs.readdirSync(stateDir).filter(x => x.endsWith('.json'))) {
-          states[f] = JSON.parse(fs.readFileSync(path.join(stateDir, f), 'utf8'));
+          try { states[f] = JSON.parse(fs.readFileSync(path.join(stateDir, f), 'utf8')); }
+          catch { states[f] = { error: 'invalid JSON' }; }
         }
       }
     } catch {}
     res.json(states);
   });
 
-  s1.app.post('/api/wizard', async (req, res) => {
-    try { writeEnv(req.body); log(s1.io, 'Settings saved', 'done'); res.json({ ok: true }); }
+  app.post('/api/wizard', async (req, res) => {
+    try { writeEnv(req.body); log(io, 'Configuration saved', 'done'); res.json({ ok: true }); }
     catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
-  s1.app.post('/api/action', async (req, res) => { res.json({ ok: true }); doAction(s1.io, req.body.cmd); });
-  s1.app.get('/map/*', (req, res) => res.redirect(`http://${DOMAIN}:${BLUEMAP_PORT}`));
+  app.post('/api/action', async (req, res) => { res.json({ ok: true }); doAction(io, req.body.cmd); });
+
+  app.get('/map/*', (req, res) => res.redirect(`http://${DOMAIN}:${BLUEMAP_PORT}`));
+}
+
+async function main() {
+  const s1 = setupServer(PORT);
+  const s2 = setupServer(PORT2);
+
+  mountRoutes(s1.app, s1.io);
+  mountRoutes(s2.app, s2.io);
 
   [s1.io, s2.io].forEach(io => {
     io.on('connection', socket => {
@@ -261,22 +303,13 @@ async function main() {
     });
   });
 
-  // Stream MC server logs to mclog channel
   setInterval(async () => {
     await pushAll(s1.io);
     await pushAll(s2.io);
-    try {
-      const { stdout } = await run(`docker logs mc --tail 3 --since 10s 2>/dev/null`);
-      if (stdout.trim()) for (const line of stdout.trim().split('\n')) mclog(s1.io, line, 'm');
-    } catch {}
-    try {
-      const { stdout } = await run(`docker logs bluemap --tail 3 --since 10s 2>/dev/null`);
-      if (stdout.trim()) for (const line of stdout.trim().split('\n')) bmlog(s1.io, line, 'm');
-    } catch {}
   }, 4000);
 
-  s1.server.listen(PORT, () => console.log('Panel: http://0.0.0.0:' + PORT));
-  s2.server.listen(PORT2, () => console.log('Panel: http://0.0.0.0:' + PORT2));
+  s1.server.listen(PORT, () => console.log(`Panel: http://0.0.0.0:${PORT} (IP: ${LOCAL_IP})`));
+  s2.server.listen(PORT2, () => console.log(`Panel: http://0.0.0.0:${PORT2} (IP: ${LOCAL_IP})`));
 }
 
 main().catch(console.error);

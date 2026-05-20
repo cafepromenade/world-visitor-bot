@@ -239,6 +239,19 @@ body{font-family:'Google Sans','Inter',sans-serif;background:var(--bg);color:var
     </div></div>
   </div>
 
+  <!-- Prune Progress Modal -->
+  <div class="modal-overlay" id="prune-modal">
+    <div class="modal"><div class="modal-inner">
+      <h2 style="font-size:1rem;font-weight:500;margin-bottom:4px">Pruning</h2>
+      <p style="font-size:.75rem;color:var(--text2);margin-bottom:12px" id="prune-msg">Preparing...</p>
+      <div class="bar"><div class="bar-fill" id="prune-bar" style="width:0%"></div></div>
+      <div id="prune-log" style="font:400 .65rem/1.5 'Google Sans Mono',monospace;color:var(--text3);max-height:160px;overflow-y:auto;margin-top:10px"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+        <button class="btn btn-o" id="prune-close" style="display:none" onclick="closePrune()">Close</button>
+      </div>
+    </div></div>
+  </div>
+
   <!-- Dashboard -->
   <div class="topbar">
     <div class="topbar-brand">
@@ -256,9 +269,10 @@ body{font-family:'Google Sans','Inter',sans-serif;background:var(--bg);color:var
 
   <div class="grid2">
     <div class="card conn-card" id="conn-card">
-      <div class="conn-label">Server Address</div>
-      <div class="conn-addr" id="conn-addr">--</div>
-      <div style="font-size:.68rem;color:var(--text3)" id="conn-status">Server offline</div>
+      <div class="conn-label">Server offline</div>
+      <div class="conn-addr" id="conn-addr" style="display:none"></div>
+      <div style="font-size:.65rem;color:var(--text3);margin-top:4px" id="conn-fallback"></div>
+      <div style="font-size:.68rem;color:var(--text3)" id="conn-status">Start the server to see connection details</div>
     </div>
     <div class="card">
       <div class="card-hd"><span class="card-ttl">Console</span></div>
@@ -298,11 +312,24 @@ let confirmCb=null, wizStep=0, wizFollow=[], wizBotNames=[], wizBotMem=[];
 function act(cmd){sio.emit('action',cmd)}
 function confirmAction(cmd,msg){
   $('confirm-title').textContent='Confirm'; $('confirm-body').textContent=msg;
-  confirmCb=()=>act(cmd); $('confirm-modal').classList.add('open');
+  confirmCb=()=>{
+    if(cmd==='prune'){
+      $('prune-modal').classList.add('open');
+      $('prune-msg').textContent='Preparing...';
+      $('prune-bar').style.width='0%';
+      $('prune-log').innerHTML='';
+      $('prune-close').style.display='none';
+    }
+    act(cmd);
+  };
+  $('confirm-modal').classList.add('open');
 }
 function closeConfirm(){$('confirm-modal').classList.remove('open');confirmCb=null}
 $('confirm-ok').onclick=()=>{if(confirmCb)confirmCb();closeConfirm()};
 $('confirm-modal').onclick=e=>{if(e.target===$('confirm-modal'))closeConfirm()}
+
+function closePrune(){$('prune-modal').classList.remove('open')}
+$('prune-modal').onclick=e=>{if(e.target===$('prune-modal'))closePrune()}
 
 function sendCmd(){
   const inp=$('cmd-input'); const cmd=inp.value.trim();
@@ -379,16 +406,39 @@ function render(s){
   if(s.stats)renderStats(s.stats);
 
   if(s.conn){
-    $('conn-addr').textContent=s.conn.host+':'+s.conn.port;
-    const mcRunning=s.mc==='running';
-    $('conn-card').className='card conn-card'+(mcRunning?' running':'');
-    $('conn-status').textContent=mcRunning?'Server online — connect now':'Server offline';
+    const mcRunning = s.mc === 'running';
+    $('conn-card').className = 'card conn-card' + (mcRunning ? ' running' : '');
+    if (mcRunning) {
+      $('conn-addr').style.display = '';
+      $('conn-addr').textContent = s.conn.primary + ':' + s.conn.port;
+      $('conn-fallback').textContent = 'or ' + s.conn.fallback + ':' + s.conn.port;
+      $('conn-status').textContent = 'Connect now';
+    } else {
+      $('conn-addr').style.display = 'none';
+      $('conn-fallback').textContent = '';
+      $('conn-status').textContent = 'Start the server to see connection details';
+    }
   }
 }
 
 sio.on('status',render);
-sio.on('connect',()=>renderLog($('log-box'),{msg:'Connected',level:'d'}));
-sio.on('disconnect',()=>renderLog($('log-box'),{msg:'Disconnected',level:'e'}));
+sio.on('connect',()=>{renderLog($('log-box'),{msg:'Connected',level:'d'})});
+sio.on('disconnect',()=>{renderLog($('log-box'),{msg:'Disconnected',level:'e'})});
+
+sio.on('prune-step',d=>{
+  const pct = Math.round(d.step/d.total*100);
+  $('prune-bar').style.width=pct+'%';
+  $('prune-bar').textContent=pct+'%';
+  $('prune-msg').textContent=d.msg;
+  $('prune-log').innerHTML+='<span class="i">'+d.msg+'</span>\n';
+});
+
+sio.on('prune-done',d=>{
+  $('prune-msg').textContent=d.ok?'Prune complete!':'Prune failed';
+  $('prune-bar').style.width='100%';
+  $('prune-bar').textContent=d.ok?'Done':'Failed';
+  $('prune-close').style.display='';
+});
 
 // Wizard
 function openWizard(){
@@ -443,8 +493,16 @@ function wizRenderFollow(){
 
 function wizLoadState(){
   fetch('/api/states').then(r=>r.json()).then(data=>{
-    $('wiz-state-json').value=JSON.stringify(data,null,2);
-  }).catch(()=>$('wiz-state-json').value='{}');
+    try {
+      const merged={};
+      for(const [k,v] of Object.entries(data||{})){
+        if(v&&v.visited) Object.assign(merged,v.visited);
+      }
+      $('wiz-state-json').value=Object.keys(merged).length?JSON.stringify(merged,null,2):'{}';
+    } catch {
+      $('wiz-state-json').value='{}';
+    }
+  }).catch(()=>{$('wiz-state-json').value='{}'});
 }
 function wizParseState(){
   try{
