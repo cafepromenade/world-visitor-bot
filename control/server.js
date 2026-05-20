@@ -7,7 +7,6 @@ const path = require('path');
 const net = require('net');
 const os = require('os');
 
-const PROJECT_HOST_DIR = process.env.PROJECT_HOST_DIR || '/home/docker/world-visitor-bot';
 const PROJECT_DIR = process.env.PROJECT_DIR || '/app/project';
 const PORT = parseInt(process.env.PORT || '80');
 const PORT2 = parseInt(process.env.PORT2 || '3000');
@@ -22,12 +21,14 @@ const envPath = path.join(PROJECT_DIR, '.env');
 const stateDir = path.join(PROJECT_DIR, 'state');
 
 function getLocalIP() {
-  const ifaces = os.networkInterfaces();
-  for (const name of Object.keys(ifaces)) {
-    for (const iface of ifaces[name]) {
-      if (iface.family === 'IPv4' && !iface.internal) return iface.address;
-    }
-  }
+  const provided = process.env.HOST_IP;
+  if (provided) return provided;
+  try {
+    const { execSync } = require('child_process');
+    const gw = execSync("ip route get 1 2>/dev/null | awk '{print $7;exit}'").toString().trim();
+    const octets = gw.split('.');
+    if (octets.length === 4 && octets[0] !== '172') return gw;
+  } catch {}
   return 'localhost';
 }
 
@@ -45,7 +46,7 @@ function getConnectionInfo() {
 
 function compose(args) {
   return new Promise((resolve) => {
-    exec(`docker compose --project-directory ${PROJECT_HOST_DIR} ${args}`, { timeout: 180000, maxBuffer: 1024 * 1024 * 10 }, (err, stdout, stderr) => {
+    exec(`docker compose --project-directory ${PROJECT_DIR} ${args}`, { timeout: 180000, maxBuffer: 1024 * 1024 * 10 }, (err, stdout, stderr) => {
       resolve({ ok: !err, stdout: stdout || '', stderr: stderr || '' });
     });
   });

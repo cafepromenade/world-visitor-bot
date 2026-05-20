@@ -9,7 +9,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - .:/app/project
     environment:
-      - PROJECT_HOST_DIR=${PWD:-/home/docker/world-visitor-bot}
       - DOMAIN=${DOMAIN:-bigheados.com}
+      - HOST_IP=${HOST_IP:-}
       - PORT=80
       - PORT2=3000
