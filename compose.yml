@@ -5,6 +5,7 @@ services:
     tty: true
     stdin_open: true
     environment:
+      TZ: "America/Toronto"
       EULA: "TRUE"
       TYPE: "PAPER"
       VERSION: "26.1.2"
@@ -28,18 +29,18 @@ services:
       - "${MC_PORT:-25565}:25565"
       - "8100:8100"
     volumes:
-      - './mc-data:/data'
-      - './config/spigot.yml:/data/spigot.yml'
-      - './config:/data/plugins/BlueMap'
-      - './web:/data/plugins/BlueMap/web'
-      - './data:/data/plugins/BlueMap/data'
-      - './web:/data/web'
-      - './data:/data/data'
+      - '${HOST_PROJECT_DIR:-.}/mc-data:/data'
+      - '${HOST_PROJECT_DIR:-.}/config/spigot.yml:/data/spigot.yml'
+      - '${HOST_PROJECT_DIR:-.}/config:/data/plugins/BlueMap'
+      - '${HOST_PROJECT_DIR:-.}/web:/data/plugins/BlueMap/web'
+      - '${HOST_PROJECT_DIR:-.}/data:/data/plugins/BlueMap/data'
+      - '${HOST_PROJECT_DIR:-.}/web:/data/web'
+      - '${HOST_PROJECT_DIR:-.}/data:/data/data'
       - '${WORLD_PATH:-./mc-data/world}:/app/world:ro'
 
   visitor:
     image: world-visitor-bot-visitor:latest
-    build: ./bot
+    build: ${HOST_PROJECT_DIR:-.}/bot
     restart: "no"
     mem_limit: "${BOT_MEMORY:-2G}"
     depends_on:
@@ -50,6 +51,7 @@ services:
       - STATE_DIR=/app/state
       - MC_HOST=mc
       - MC_PORT=25565
+      - TZ=America/Toronto
       - MC_USERNAME=${MC_USERNAME:-Bot}
       - MC_AUTH=offline
       - NEW_ONLY=false
@@ -65,19 +67,20 @@ services:
       - MOVE_DELAY=${MOVE_DELAY:-150}
       - FOLLOW_PLAYER=${FOLLOW_PLAYER:-}
       - BLUEMAP_MARKERS_JSON=/app/bluemap-web/maps/overworld/live/markers.json
+      - BLUEMAP_BACKUP_MARKERS_JSON=/app/bluemap-web/maps/overworld/live/bot-markers.backup.json
       - SHUTDOWN_ON_COMPLETE=true
       - BOT_COUNT=${BOT_COUNT:-1}
       - BOT_INDEX=0
     volumes:
       - '${WORLD_PATH:-./mc-data/world}:/repo/world:ro'
-      - './.git:/repo/.git:ro'
-      - './state:/app/state'
-      - './config:/app/bluemap-config'
-      - './web:/app/bluemap-web'
+      - '${HOST_PROJECT_DIR:-.}/.git:/repo/.git:ro'
+      - '${HOST_PROJECT_DIR:-.}/state:/app/state'
+      - '${HOST_PROJECT_DIR:-.}/config:/app/bluemap-config'
+      - '${HOST_PROJECT_DIR:-.}/web:/app/bluemap-web'
 
   visitor1:
     image: world-visitor-bot-visitor:latest
-    build: ./bot
+    build: ${HOST_PROJECT_DIR:-.}/bot
     restart: "no"
     mem_limit: "${BOT_MEMORY:-2G}"
     profiles:
@@ -90,6 +93,7 @@ services:
       - STATE_DIR=/app/state
       - MC_HOST=mc
       - MC_PORT=25565
+      - TZ=America/Toronto
       - MC_USERNAME=${MC_USERNAME:-Bot}
       - MC_AUTH=offline
       - NEW_ONLY=false
@@ -105,19 +109,20 @@ services:
       - MOVE_DELAY=${MOVE_DELAY:-150}
       - FOLLOW_PLAYER=${FOLLOW_PLAYER:-}
       - BLUEMAP_MARKERS_JSON=/app/bluemap-web/maps/overworld/live/markers.json
+      - BLUEMAP_BACKUP_MARKERS_JSON=/app/bluemap-web/maps/overworld/live/bot-markers.backup.json
       - SHUTDOWN_ON_COMPLETE=false
       - BOT_COUNT=${BOT_COUNT:-2}
       - BOT_INDEX=1
     volumes:
       - '${WORLD_PATH:-./mc-data/world}:/repo/world:ro'
-      - './.git:/repo/.git:ro'
-      - './state:/app/state'
-      - './config:/app/bluemap-config'
-      - './web:/app/bluemap-web'
+      - '${HOST_PROJECT_DIR:-.}/.git:/repo/.git:ro'
+      - '${HOST_PROJECT_DIR:-.}/state:/app/state'
+      - '${HOST_PROJECT_DIR:-.}/config:/app/bluemap-config'
+      - '${HOST_PROJECT_DIR:-.}/web:/app/bluemap-web'
 
   visitor2:
     image: world-visitor-bot-visitor:latest
-    build: ./bot
+    build: ${HOST_PROJECT_DIR:-.}/bot
     restart: "no"
     mem_limit: "${BOT_MEMORY:-2G}"
     profiles:
@@ -130,6 +135,7 @@ services:
       - STATE_DIR=/app/state
       - MC_HOST=mc
       - MC_PORT=25565
+      - TZ=America/Toronto
       - MC_USERNAME=${MC_USERNAME:-Bot}
       - MC_AUTH=offline
       - NEW_ONLY=false
@@ -145,19 +151,20 @@ services:
       - MOVE_DELAY=${MOVE_DELAY:-150}
       - FOLLOW_PLAYER=${FOLLOW_PLAYER:-}
       - BLUEMAP_MARKERS_JSON=/app/bluemap-web/maps/overworld/live/markers.json
+      - BLUEMAP_BACKUP_MARKERS_JSON=/app/bluemap-web/maps/overworld/live/bot-markers.backup.json
       - SHUTDOWN_ON_COMPLETE=false
       - BOT_COUNT=${BOT_COUNT:-3}
       - BOT_INDEX=2
     volumes:
       - '${WORLD_PATH:-./mc-data/world}:/repo/world:ro'
-      - './.git:/repo/.git:ro'
-      - './state:/app/state'
-      - './config:/app/bluemap-config'
-      - './web:/app/bluemap-web'
+      - '${HOST_PROJECT_DIR:-.}/.git:/repo/.git:ro'
+      - '${HOST_PROJECT_DIR:-.}/state:/app/state'
+      - '${HOST_PROJECT_DIR:-.}/config:/app/bluemap-config'
+      - '${HOST_PROJECT_DIR:-.}/web:/app/bluemap-web'
 
   visitor3:
     image: world-visitor-bot-visitor:latest
-    build: ./bot
+    build: ${HOST_PROJECT_DIR:-.}/bot
     restart: "no"
     mem_limit: "${BOT_MEMORY:-2G}"
     profiles:
@@ -170,6 +177,7 @@ services:
       - STATE_DIR=/app/state
       - MC_HOST=mc
       - MC_PORT=25565
+      - TZ=America/Toronto
       - MC_USERNAME=${MC_USERNAME:-Bot}
       - MC_AUTH=offline
       - NEW_ONLY=false
@@ -185,26 +193,29 @@ services:
       - MOVE_DELAY=${MOVE_DELAY:-150}
       - FOLLOW_PLAYER=${FOLLOW_PLAYER:-}
       - BLUEMAP_MARKERS_JSON=/app/bluemap-web/maps/overworld/live/markers.json
+      - BLUEMAP_BACKUP_MARKERS_JSON=/app/bluemap-web/maps/overworld/live/bot-markers.backup.json
       - SHUTDOWN_ON_COMPLETE=false
       - BOT_COUNT=${BOT_COUNT:-4}
       - BOT_INDEX=3
     volumes:
       - '${WORLD_PATH:-./mc-data/world}:/repo/world:ro'
-      - './.git:/repo/.git:ro'
-      - './state:/app/state'
-      - './config:/app/bluemap-config'
-      - './web:/app/bluemap-web'
+      - '${HOST_PROJECT_DIR:-.}/.git:/repo/.git:ro'
+      - '${HOST_PROJECT_DIR:-.}/state:/app/state'
+      - '${HOST_PROJECT_DIR:-.}/config:/app/bluemap-config'
+      - '${HOST_PROJECT_DIR:-.}/web:/app/bluemap-web'
 
   bluemap:
     image: ghcr.io/bluemap-minecraft/bluemap:latest
     restart: "no"
     command: -r
+    environment:
+      - TZ=America/Toronto
     volumes:
-      - './config:/app/config'
+      - '${HOST_PROJECT_DIR:-.}/config:/app/config'
       - '${WORLD_PATH:-./world}:/app/world'
-      - './data:/app/data'
-      - './web:/app/web'
-      - './world_nether:/app/world_nether'
-      - './world_the_end:/app/world_the_end'
+      - '${HOST_PROJECT_DIR:-.}/data:/app/data'
+      - '${HOST_PROJECT_DIR:-.}/web:/app/web'
+      - '${HOST_PROJECT_DIR:-.}/world_nether:/app/world_nether'
+      - '${HOST_PROJECT_DIR:-.}/world_the_end:/app/world_the_end'
     profiles:
       - cli

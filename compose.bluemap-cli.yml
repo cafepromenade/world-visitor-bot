@@ -3,11 +3,13 @@ services:
     image: ghcr.io/bluemap-minecraft/bluemap:latest
     restart: "no"
     command: -r
+    environment:
+      - TZ=America/Toronto
     volumes:
-      - './config:/app/config'
-      - './config/webserver-off.conf:/app/config/webserver.conf'
+      - '${HOST_PROJECT_DIR:-.}/config:/app/config'
+      - '${HOST_PROJECT_DIR:-.}/config/webserver-off.conf:/app/config/webserver.conf'
       - '${WORLD_PATH:-./mc-data/world}:/app/world'
-      - './data:/app/data'
-      - './web:/app/web'
-      - './world_nether:/app/world_nether'
-      - './world_the_end:/app/world_the_end'
+      - '${HOST_PROJECT_DIR:-.}/data:/app/data'
+      - '${HOST_PROJECT_DIR:-.}/web:/app/web'
+      - '${HOST_PROJECT_DIR:-.}/world_nether:/app/world_nether'
+      - '${HOST_PROJECT_DIR:-.}/world_the_end:/app/world_the_end'

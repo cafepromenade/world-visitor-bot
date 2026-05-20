@@ -5,6 +5,8 @@ Thumbs.db
 session-*.md
 cache/
 debug-runs/
+logs/*
+!logs/.gitkeep
 node_modules/
 /web
 /data

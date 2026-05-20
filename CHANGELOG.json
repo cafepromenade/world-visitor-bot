@@ -1,0 +1,26 @@
+[
+  {
+    "date": "2026-05-20T17:00:00.000Z",
+    "severity": "feature",
+    "title": "Automated bug watcher and site tools",
+    "summary": "Added queued bug reports, auto-approval, lifecycle comments, IPv4 consent capture, background validation, automated opencode repair branches, PR comments, changelog viewing, and world zip import.",
+    "cause": "The control panel needed a zero-interaction way to capture site issues, treat warnings as small errors, and keep fixes traceable.",
+    "fixed": [],
+    "features": [
+      "Report Bugs modal queues automated repair tasks and only asks once for IPv4 collection consent",
+      "Users can add public comments to bug reports after submission",
+      "Checker queues related improvements from user feedback comments automatically",
+      "Bug watcher stores reports and sessions in logs/bug-watcher",
+      "Reports are auto-approved, updated while processing, and finished with public comments, cause, summary, branch, session log, and PR URL",
+      "Each unrelated error gets an autofix branch while related errors share a signature",
+      "Changelog modal shows dated entries colored by severity",
+      "World zip import auto-detects classic and dimensions world roots"
+    ],
+    "comments": [
+      "How it went: the control panel gained a public request lifecycle so submitted reports no longer disappear after queuing.",
+      "How it should improve: future watcher runs should add regression checks for repeated signatures, keep comments synced to pull requests, and use user feedback comments as follow-up requirements."
+    ],
+    "branch": "feature/auto-bug-watcher",
+    "prUrl": ""
+  }
+]

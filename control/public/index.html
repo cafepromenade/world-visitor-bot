@@ -86,6 +86,14 @@ body{font-family:'Google Sans','Inter',sans-serif;background:var(--bg);color:var
 .stat-row:not(:last-child){border-bottom:1px solid var(--border)}
 .stat-l{color:var(--text2)}
 .stat-v{font-weight:500;font-family:'Google Sans Mono',monospace}
+.chunk-panel{background:var(--bg);border-radius:var(--radius-sm);padding:12px;border:1px solid var(--border);min-height:270px}
+.chunk-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
+.chunk-map{background:rgba(0,0,0,.18);border:1px solid var(--border);border-radius:12px;padding:10px}
+.chunk-map svg{width:100%;height:220px;background:#0b0d12;border-radius:10px;border:1px solid #ffffff12}
+.chunk-loaded{fill:#34a85366;stroke:#34a853aa;stroke-width:.4}
+.chunk-path{fill:#8ab4f866;stroke:#8ab4f8;stroke-width:.5}
+.chunk-prev{fill:#ea433588;stroke:#fff;stroke-width:1}
+.chunk-center{fill:#fbbc04;stroke:#fff;stroke-width:1.2}
 
 .log-box{background:var(--bg);border-radius:var(--radius-sm);padding:12px;font:400 .68rem/1.6 'Google Sans Mono',monospace;color:var(--text3);max-height:260px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;border:1px solid var(--border)}
 .log-box .t{color:var(--yellow)} .log-box .e{color:var(--red)} .log-box .i{color:var(--primary)} .log-box .d{color:var(--green)} .log-box .m{color:var(--text3)}
@@ -134,6 +142,16 @@ body{font-family:'Google Sans','Inter',sans-serif;background:var(--bg);color:var
 
 .state-mgr{border:1px dashed var(--border);border-radius:var(--radius);padding:14px;margin-top:8px}
 .state-mgr textarea{width:100%;height:120px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font:400 .7rem 'Google Sans Mono',monospace;padding:10px;resize:vertical}
+.severity{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:.62rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.severity-critical,.severity-error{background:var(--red)22;color:var(--red);border:1px solid var(--red)55}
+.severity-warning{background:var(--yellow)22;color:var(--yellow);border:1px solid var(--yellow)55}
+.severity-fix{background:var(--green)22;color:var(--green);border:1px solid var(--green)55}
+.severity-feature{background:var(--primary)22;color:var(--primary);border:1px solid var(--primary)55}
+.change-card,.watcher-task{border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;margin-bottom:8px;background:rgba(0,0,0,.13)}
+.change-title{font-size:.82rem;font-weight:500;margin:6px 0}
+.drop-zone{border:1px dashed var(--accent);border-radius:var(--radius);padding:18px;text-align:center;background:var(--accent)10;color:var(--text2);cursor:pointer;transition:var(--t)}
+.drop-zone.drag{background:var(--accent)22;color:var(--text)}
+.upload-progress{height:20px;background:var(--bg);border-radius:10px;overflow:hidden;margin-top:10px}
 
 @media(max-width:520px){
   .topbar{flex-direction:column;align-items:flex-start}
@@ -244,6 +262,55 @@ body{font-family:'Google Sans','Inter',sans-serif;background:var(--bg);color:var
     </div></div>
   </div>
 
+  <!-- Bug Report / Auto Fix Modal -->
+  <div class="modal-overlay" id="bug-modal">
+    <div class="modal" style="max-width:760px"><div class="modal-inner">
+      <h2 style="font-size:1rem;font-weight:500;margin-bottom:6px">Report Bugs & Auto Fix</h2>
+      <p style="font-size:.75rem;color:var(--text2);margin-bottom:10px">Reports are saved in logs/bug-watcher and queued for automated opencode repair.</p>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Severity</label><select class="form-select" id="bug-severity"><option value="error">Error</option><option value="critical">Critical</option><option value="warning">Warning</option><option value="feature">Feature request</option></select></div>
+        <div class="form-group"><label class="form-label">Title</label><input class="form-input" id="bug-title" placeholder="What broke?"></div>
+      </div>
+      <div class="state-mgr"><textarea id="bug-details" style="height:120px" placeholder="What happened? Include steps, expected result, and actual result."></textarea></div>
+      <div class="change-card" id="bug-ip-consent-box" style="margin-top:10px;border-color:var(--yellow)55">
+        <span class="severity severity-warning">IP notice</span>
+        <div class="card-sub" style="margin-top:6px">Bug reports collect your public IPv4 and server-observed IPv4 so automated fixes can trace network-specific problems. This consent is saved in this browser after you agree once.</div>
+        <label class="card-sub" style="display:flex;gap:8px;align-items:center;margin-top:8px;color:var(--text)"><input type="checkbox" id="bug-ip-consent"> I agree to IPv4 collection for bug reports.</label>
+      </div>
+      <div class="card-sub" id="bug-ip-consent-saved" style="display:none;margin-top:8px;color:var(--green)">IPv4 collection consent saved for this browser.</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap">
+        <button class="btn btn-o btn-sm" onclick="runWatcherCheck()">Run Checks Now</button>
+        <button class="btn btn-f btn-sm" onclick="submitBugReport()">Queue Report</button>
+        <button class="btn btn-o btn-sm" onclick="closeBugModal()">Close</button>
+      </div>
+      <div class="card-sub" id="bug-result" style="margin-top:8px">Idle.</div>
+      <div id="watcher-status" style="margin-top:10px"></div>
+    </div></div>
+  </div>
+
+  <!-- Changelog Modal -->
+  <div class="modal-overlay" id="changelog-modal">
+    <div class="modal" style="max-width:780px"><div class="modal-inner">
+      <h2 style="font-size:1rem;font-weight:500;margin-bottom:6px">Changelog</h2>
+      <p style="font-size:.75rem;color:var(--text2);margin-bottom:10px">Full dated summaries of fixes, causes, severity, and new features.</p>
+      <div id="changelog-list" style="max-height:62vh;overflow-y:auto"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><button class="btn btn-o" onclick="closeChangelog()">Close</button></div>
+    </div></div>
+  </div>
+
+  <!-- World Import Modal -->
+  <div class="modal-overlay" id="import-modal">
+    <div class="modal" style="max-width:680px"><div class="modal-inner">
+      <h2 style="font-size:1rem;font-weight:500;margin-bottom:6px">Import World Zip</h2>
+      <p style="font-size:.75rem;color:var(--text2);margin-bottom:10px">Upload a Minecraft world zip. The importer auto-detects old region/ and new dimensions/minecraft/overworld/region layouts.</p>
+      <div class="drop-zone" id="world-drop" onclick="$('world-file').click()">Drop a .zip here or click to choose</div>
+      <input type="file" id="world-file" accept=".zip,application/zip" style="display:none" onchange="if(this.files[0])uploadWorldZip(this.files[0])">
+      <div class="upload-progress"><div class="bar-fill" id="world-upload-bar" style="width:0%"></div></div>
+      <div class="card-sub" id="world-import-result" style="margin-top:8px">No upload started.</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><button class="btn btn-o" onclick="closeImport()">Close</button></div>
+    </div></div>
+  </div>
+
   <!-- Prune Progress Modal -->
   <div class="modal-overlay" id="prune-modal">
     <div class="modal"><div class="modal-inner">
@@ -280,6 +347,9 @@ body{font-family:'Google Sans','Inter',sans-serif;background:var(--bg);color:var
     <div class="topbar-actions">
       <button class="btn btn-f" onclick="openWizard()">Setup</button>
       <button class="btn btn-t" onclick="openState()">States</button>
+      <button class="btn btn-t" onclick="openImport()">Import World</button>
+      <button class="btn btn-t" onclick="openBugModal()">Report Bugs</button>
+      <button class="btn btn-t" onclick="location.href='/changelog.html'">Changelog</button>
       <button class="btn btn-t" id="open-bluemap-btn" onclick="openBlueMap()">Open BlueMap</button>
       <button class="btn btn-f" id="run-bot-btn" style="background:var(--green)" onclick="act('run-bot')">Run the Bot</button>
       <button class="btn btn-o btn-danger" id="stop-btn" onclick="confirmAction('stop-all','Stop all services? MC server and bots will shut down.')">Stop</button>
@@ -290,7 +360,7 @@ body{font-family:'Google Sans','Inter',sans-serif;background:var(--bg);color:var
 
   <div class="grid2">
     <div class="card conn-card" id="conn-card">
-      <div class="conn-label">Server offline</div>
+      <div class="conn-label" id="conn-label">Server offline</div>
       <div class="conn-addr" id="conn-addr" style="display:none;cursor:pointer" onclick="copyAddr()" title="Click to copy"></div>
       <div style="font-size:.65rem;color:var(--text3);margin-top:2px" id="conn-fallback"></div>
       <div style="font-size:.68rem;color:var(--text3)" id="conn-status">Start the server to see connection details</div>
@@ -340,14 +410,16 @@ body{font-family:'Google Sans','Inter',sans-serif;background:var(--bg);color:var
   </div>
 
   <div class="tabs" style="position:relative">
-    <button class="tab active" onclick="switchTab('controls')">Control Log</button>
-    <button class="tab" onclick="switchTab('mc')">MC Server Log</button>
-    <button class="tab" onclick="switchTab('bluemap')">BlueMap Log</button>
+    <button class="tab active" data-tab="controls" onclick="switchTab('controls')">Control Log</button>
+    <button class="tab" data-tab="mc" onclick="switchTab('mc')">MC Server Log</button>
+    <button class="tab" data-tab="bluemap" onclick="switchTab('bluemap')">BlueMap Log</button>
+    <button class="tab" data-tab="chunks" onclick="switchTab('chunks')">Bot Chunks</button>
     <button class="btn btn-o btn-sm" style="margin-left:auto" onclick="exportLogs(activeTab)" title="Export current log">Export</button>
   </div>
   <div class="log-box" id="log-box" style="height:270px">Connecting...</div>
   <div class="log-box" id="mc-log-box" style="height:270px;display:none">Waiting for MC server logs...</div>
   <div class="log-box" id="bm-log-box" style="height:270px;display:none">Waiting for BlueMap logs...</div>
+  <div class="chunk-panel" id="chunk-panel" style="display:none">Waiting for bot chunk snapshots...</div>
 </div>
 
 <script src="/socket.io/socket.io.js"></script>
@@ -357,6 +429,9 @@ const sio=io();
 let confirmCb=null, wizStep=0, wizFollow=[], wizBotNames=[], wizBotMem=[];
 let lastStatus=null;
 let busy=false;
+let stateCache={};
+let watcherTimer=null;
+const TORONTO_TZ='America/Toronto';
 
 function act(cmd, force){if(busy&&!force)return; sio.emit('action',cmd)}
 function confirmAction(cmd,msg){
@@ -407,20 +482,22 @@ sio.on('cmd-result',d=>{ $('cmd-result').textContent=d; });
 function switchTab(t){
   activeTab=t;
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-  $('log-box').style.display='none'; $('mc-log-box').style.display='none'; $('bm-log-box').style.display='none';
-  if(t==='controls'){$('log-box').style.display='';document.querySelectorAll('.tab')[0].classList.add('active')}
-  else if(t==='mc'){$('mc-log-box').style.display='';document.querySelectorAll('.tab')[1].classList.add('active')}
-  else{$('bm-log-box').style.display='';document.querySelectorAll('.tab')[2].classList.add('active')}
+  $('log-box').style.display='none'; $('mc-log-box').style.display='none'; $('bm-log-box').style.display='none'; $('chunk-panel').style.display='none';
+  const tab=document.querySelector('.tab[data-tab="'+t+'"]'); if(tab)tab.classList.add('active');
+  if(t==='controls')$('log-box').style.display='';
+  else if(t==='mc')$('mc-log-box').style.display='';
+  else if(t==='bluemap')$('bm-log-box').style.display='';
+  else{$('chunk-panel').style.display='';renderChunkSnapshots((lastStatus&&lastStatus.bots)||[])}
 }
 
 function renderLog(el,data){
   if(!el._l)el._l=[];
-  const t=new Date().toLocaleTimeString([], {hour12:false});
+  const t=new Date().toLocaleTimeString('en-CA', {timeZone:TORONTO_TZ,hour12:false});
   el._l.push('<span class="t">'+t+'</span> <span class="'+(data.level||'m')+'">'+he(data.msg)+'</span>');
   if(el._l.length>400)el._l=el._l.slice(-400);
   el.innerHTML=el._l.join('\n'); el.scrollTop=el.scrollHeight;
 }
-function he(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function he(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
 
 sio.on('log',d=>renderLog($('log-box'),d));
 sio.on('visitor-log',d=>renderLog($('log-box'),{msg:d.msg,level:'m'}));
@@ -436,6 +513,27 @@ function openBlueMap(){
   window.open(url,'_blank','noopener');
 }
 
+function blueMapUrlForPos(p){
+  const bm=lastStatus&&lastStatus.bluemapInfo;
+  if(!bm||!bm.available||!p)return '';
+  const base=bm.mode==='web'?'http://'+location.hostname+':'+bm.port:bm.staticUrl;
+  return base+'#overworld:'+Math.round(p.x)+':'+Math.round(p.y)+':'+Math.round(p.z)+':500:0:0:0:0:perspective';
+}
+
+function openBotMap(id){
+  const bots=(lastStatus&&lastStatus.bots)||[];
+  const b=bots.find(x=>x.id===id);
+  const url=b&&blueMapUrlForPos(b.position);
+  if(!url){renderLog($('log-box'),{msg:'BlueMap location is not available for that bot yet.',level:'e'});return}
+  window.open(url,'_blank','noopener');
+}
+
+function fmtToronto(value){
+  const t=Date.parse(value||'');
+  if(!t)return 'unknown';
+  return new Date(t).toLocaleString('en-CA',{timeZone:TORONTO_TZ,hour12:false,timeZoneName:'short'});
+}
+
 function botAge(updatedAt){
   const t=Date.parse(updatedAt||'');
   if(!t)return 'unknown';
@@ -449,10 +547,32 @@ function botAge(updatedAt){
 function renderMarkerInfo(info){
   if(!info){$('marker-status').textContent='BlueMap marker set: World Visitor Bots';return}
   const updated=info.updatedAt?botAge(info.updatedAt):'not written yet';
-  $('marker-status').textContent=(info.present?'BlueMap markers updated ':'BlueMap markers pending ') + updated + ' - marker set: ' + info.set;
+  const backup=info.backupPresent?' backup markers ready':' backup markers pending';
+  $('marker-status').textContent=(info.present?'BlueMap markers updated ':'BlueMap markers pending ') + updated + ' - marker set: ' + info.set + ' -' + backup;
 }
 
 function fmtPos(p){return Math.round(p.x)+', '+Math.round(p.y)+', '+Math.round(p.z)}
+
+function renderChunkSnapshots(bots){
+  const el=$('chunk-panel');
+  if(!bots||!bots.length){el.innerHTML='Waiting for bot chunk snapshots...';return}
+  el.innerHTML='<div class="chunk-grid">'+bots.map(b=>{
+    const p=b.position||{x:0,y:0,z:0};
+    const chunks=b.chunks||{};
+    const loaded=Array.isArray(chunks.loaded)?chunks.loaded:[];
+    const path=Array.isArray(b.path)?b.path:[];
+    const cx=chunks.center?chunks.center.x:Math.floor(p.x/16), cz=chunks.center?chunks.center.z:Math.floor(p.z/16);
+    const prev=chunks.previous||null;
+    const minX=cx-16, minZ=cz-16, size=320/33;
+    const rect=(x,z,cls)=>'<rect class="'+cls+'" x="'+((x-minX)*size).toFixed(1)+'" y="'+((z-minZ)*size).toFixed(1)+'" width="'+Math.max(1,size-1).toFixed(1)+'" height="'+Math.max(1,size-1).toFixed(1)+'"/>';
+    const loadedSvg=loaded.slice(-900).map(c=>rect(c.x,c.z,'chunk-loaded')).join('');
+    const pathSvg=path.slice(-80).map(pt=>rect(Math.floor(pt.x/16),Math.floor(pt.z/16),'chunk-path')).join('');
+    const prevSvg=prev?rect(prev.x,prev.z,'chunk-prev'):'';
+    const center=rect(cx,cz,'chunk-center');
+    const black=b.blackSpot?'<div class="card-sub" style="color:var(--yellow)">Black spot retry: '+he(b.blackSpot.missing)+'/'+he(b.blackSpot.total)+' chunks missing</div>':'';
+    return '<div class="chunk-map"><div class="card-hd"><span class="card-ttl">'+he(b.username)+'</span></div><div class="card-sub">Chunk '+cx+', '+cz+' - previous '+(prev?prev.x+', '+prev.z:'unknown')+' - region '+he(b.region||'-')+' - loaded '+(chunks.loadedCount||loaded.length)+'/'+(chunks.expectedCount||'?')+'</div>'+black+'<svg viewBox="0 0 320 320" role="img" aria-label="Recent chunks for '+he(b.username)+'">'+loadedSvg+pathSvg+prevSvg+center+'</svg><div class="card-sub">Yellow=current, red=previous, blue=recent route, green=loaded sample</div><div class="card-sub">Last updated: '+fmtToronto(b.updatedAt)+'</div></div>';
+  }).join('')+'</div>';
+}
 
 function teleportToBot(id){
   const player=$('tp-player').value.trim();
@@ -478,9 +598,11 @@ function renderBots(bots){
   $('bot-locations').innerHTML=bots.map(b=>{
     const id=he(b.id).replace(/'/g,'&#39;');
     const p=b.position||{x:0,y:0,z:0};
-    const sub=(b.region?'region '+he(b.region):'no region')+(b.waypoint?' - wp '+he(b.waypoint):'')+' - '+botAge(b.updatedAt);
-    return '<div class="stat-row"><span class="stat-l"><b>'+he(b.username)+'</b><br><small>'+sub+'</small></span><span class="stat-v">'+fmtPos(p)+' <button class="btn btn-t btn-sm" onclick="teleportToBot(\''+id+'\')">TP</button></span></div>';
+    const sub=(b.region?'region '+he(b.region):'no region')+(b.waypoint?' - wp '+he(b.waypoint):'')+' - '+botAge(b.updatedAt)+' - last updated '+fmtToronto(b.updatedAt);
+    const black=b.blackSpot?' <small style="color:var(--yellow)">black spot retry active</small>':'';
+    return '<div class="stat-row"><span class="stat-l"><b>'+he(b.username)+'</b><br><small>'+sub+'</small>'+black+'</span><span class="stat-v">'+fmtPos(p)+' <button class="btn btn-t btn-sm" onclick="openBotMap(\''+id+'\')">Map</button> <button class="btn btn-t btn-sm" onclick="teleportToBot(\''+id+'\')">TP</button></span></div>';
   }).join('');
+  if(activeTab==='chunks')renderChunkSnapshots(bots);
 }
 
 function renderStats(stats,status){
@@ -549,7 +671,8 @@ function render(s){
   }
 
   const p=s.progress||{};
-  if(!p.total) $('prog-card').style.display='none';
+  const botProgressActive=s.visitor==='running'||s.visitor==='starting';
+  if(!botProgressActive||!p.total) $('prog-card').style.display='none';
   else{
     $('prog-card').style.display='';
     const pct=Math.min(100, Math.round(p.pct ?? (p.regions/p.total*100))||0);
@@ -573,9 +696,10 @@ function render(s){
   renderBots(s.bots||[]);
 
   if(s.conn){
-    const mcRunning = s.mc === 'running';
-    $('conn-card').className = 'card conn-card' + (mcRunning ? ' running' : '');
-    if (mcRunning) {
+    const mcOnline = Boolean(s.conn.online || s.mc === 'running');
+    $('conn-card').className = 'card conn-card' + (mcOnline ? ' running' : '');
+    $('conn-label').textContent = mcOnline ? 'Server online' : (s.mc === 'starting' ? 'Server starting' : 'Server offline');
+    if (mcOnline) {
       $('conn-addr').style.display = '';
       $('conn-addr').textContent = s.conn.primary + ':' + s.conn.port;
       $('conn-fallback').textContent = 'or ' + s.conn.fallback + ':' + s.conn.port;
@@ -641,9 +765,125 @@ function exportLogs(tab){
   const text = (el._l||[]).join('\n').replace(/<[^>]*>/g,'');
   const blob = new Blob([text],{type:'text/plain'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-  a.download = 'visitor-log-'+tab+'-'+new Date().toISOString().slice(0,19)+'.txt';
+  const stamp = new Date().toLocaleString('en-CA',{timeZone:TORONTO_TZ,hour12:false}).replace(/[,: ]/g,'-');
+  a.download = 'visitor-log-'+tab+'-'+stamp+'.txt';
   a.click();
 }
+
+function severityClass(s){s=String(s||'feature').toLowerCase();return 'severity severity-'+(s==='critical'?'critical':s==='error'?'error':s==='warning'?'warning':s==='fix'?'fix':'feature')}
+function fmtDate(value){return value?new Date(value).toLocaleString('en-CA',{timeZone:TORONTO_TZ,hour12:false,timeZoneName:'short'}):'unknown'}
+
+function openBugModal(){
+  $('bug-modal').classList.add('open');
+  renderBugConsent();
+  refreshWatcher();
+  clearInterval(watcherTimer);
+  watcherTimer=setInterval(refreshWatcher,5000);
+}
+function closeBugModal(){$('bug-modal').classList.remove('open');clearInterval(watcherTimer);watcherTimer=null}
+$('bug-modal').onclick=e=>{if(e.target===$('bug-modal'))closeBugModal()}
+function hasBugIpConsent(){return localStorage.getItem('worldVisitorBugIpConsent')==='1'}
+function renderBugConsent(){
+  const saved=hasBugIpConsent();
+  $('bug-ip-consent-box').style.display=saved?'none':'';
+  $('bug-ip-consent-saved').style.display=saved?'':'none';
+  $('bug-ip-consent').checked=saved;
+}
+async function getPublicIpv4(){
+  try{
+    const ctl=new AbortController();
+    const t=setTimeout(()=>ctl.abort(),3500);
+    const r=await fetch('https://api.ipify.org?format=json',{signal:ctl.signal});
+    clearTimeout(t);
+    const d=await r.json();
+    return String(d.ip||'').match(/^\d+\.\d+\.\d+\.\d+$/)?d.ip:'';
+  }catch{return ''}
+}
+function renderWatcherStatus(data){
+  if(!data){$('watcher-status').innerHTML='';return}
+  const cur=data.current;
+  const flags='<div class="card-sub">Auto fix '+(data.autoFix?'on':'off')+' - queued '+(data.queue||[]).length+' - warnings are '+(data.treatWarningsAsErrors?'small errors':'informational')+' - sudo '+(data.sudo?'allowed':'off')+'</div>';
+  const current=cur?'<div class="watcher-task"><span class="'+severityClass(cur.severity)+'">'+he(cur.severity)+'</span><div class="change-title">Running: '+he(cur.title)+'</div><div class="card-sub">Branch '+he(cur.branch)+' - attempt '+he(cur.attempts)+'</div></div>':'';
+  const queue=(data.queue||[]).slice(0,8).map(t=>'<div class="watcher-task"><span class="'+severityClass(t.severity)+'">'+he(t.severity)+'</span><div class="change-title">'+he(t.title)+'</div><div class="card-sub">'+he(t.status)+' - '+he(t.branch)+' - '+fmtDate(t.createdAt)+'</div></div>').join('')||'<div class="card-sub">Queue is empty.</div>';
+  const reports=(data.reports||[]).slice(0,5).map(r=>{
+    const comments=(r.comments||[]).slice(-3).map(c=>'<div class="card-sub">Comment: '+he(c.message)+' <small>'+fmtDate(c.at)+'</small></div>').join('');
+    const id=he(r.id);
+    return '<div class="watcher-task"><span class="'+severityClass(r.severity)+'">'+he(r.severity)+'</span><div class="change-title">'+he(r.title)+'</div><div class="card-sub">'+fmtDate(r.createdAt)+' - '+he(r.status||'queued')+' - '+he(r.approval||'')+' - IPv4 '+he(r.publicIpv4||r.observedIpv4||'unknown')+'</div>'+comments+'<div class="cmd-box"><input class="cmd-input" id="bug-comment-'+id+'" placeholder="Add public feedback/comment"><button class="btn btn-t btn-sm" onclick="submitReportComment(\''+id+'\')">Comment</button></div></div>';
+  }).join('');
+  $('watcher-status').innerHTML=flags+current+'<div class="change-title">Queue</div>'+queue+(reports?'<div class="change-title">Recent Reports</div>'+reports:'')+'<div class="card-sub">Last check: '+fmtDate(data.lastCheckAt)+' '+(data.lastCheckLog?' - '+he(data.lastCheckLog):'')+'</div>';
+}
+function refreshWatcher(){fetch('/api/bug-watcher').then(r=>r.json()).then(renderWatcherStatus).catch(e=>{$('watcher-status').innerHTML='<div class="card-sub">Watcher unavailable: '+he(e.message)+'</div>'})}
+async function ensureBugConsent(){
+  if(hasBugIpConsent())return true;
+  if(!$('bug-ip-consent').checked){$('bug-result').textContent='Agree to IPv4 collection once before submitting bug reports or comments.';return false}
+  localStorage.setItem('worldVisitorBugIpConsent','1');
+  renderBugConsent();
+  return true;
+}
+async function submitBugReport(){
+  if(!await ensureBugConsent())return;
+  const payload={severity:$('bug-severity').value,title:$('bug-title').value.trim()||'Site bug report',details:$('bug-details').value.trim(),page:location.href,userAgent:navigator.userAgent,ipConsent:true,publicIpv4:await getPublicIpv4()};
+  if(!payload.details){$('bug-result').textContent='Bug details are required.';return}
+  $('bug-result').textContent='Saving approved report and queuing auto-fix...';
+  fetch('/api/bug-report',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+    .then(r=>r.json()).then(d=>{if(d.ok){$('bug-result').textContent='Approved and queued '+d.task.branch;renderWatcherStatus(d.status);$('bug-details').value='';}else $('bug-result').textContent='Report failed: '+(d.error||'unknown')})
+    .catch(e=>{$('bug-result').textContent='Report failed: '+e.message});
+}
+async function submitReportComment(id){
+  if(!await ensureBugConsent())return;
+  const input=$('bug-comment-'+id);
+  const message=(input&&input.value||'').trim();
+  if(!message){$('bug-result').textContent='Comment text is required.';return}
+  $('bug-result').textContent='Adding public comment and queuing related improvements...';
+  fetch('/api/bug-report/'+encodeURIComponent(id)+'/comment',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,ipConsent:true,publicIpv4:await getPublicIpv4()})})
+    .then(r=>r.json()).then(d=>{if(d.ok){$('bug-result').textContent='Comment added and checker updated.';renderWatcherStatus(d.status)}else $('bug-result').textContent='Comment failed: '+(d.error||'unknown')})
+    .catch(e=>{$('bug-result').textContent='Comment failed: '+e.message});
+}
+function runWatcherCheck(){
+  $('bug-result').textContent='Running validation checks and queueing warnings/errors...';
+  fetch('/api/bug-watcher/check',{method:'POST'}).then(r=>r.json()).then(d=>{if(d.ok){$('bug-result').textContent='Checks complete. Failed/warnings queued: '+d.failed;renderWatcherStatus(d.status)}else $('bug-result').textContent='Check failed: '+(d.error||'unknown')}).catch(e=>{$('bug-result').textContent='Check failed: '+e.message});
+}
+
+function openChangelog(){
+  $('changelog-modal').classList.add('open');
+  $('changelog-list').innerHTML='<div class="card-sub">Loading changelog...</div>';
+  fetch('/api/changelog').then(r=>r.json()).then(renderChangelog).catch(e=>{$('changelog-list').innerHTML='<div class="card-sub">Failed to load: '+he(e.message)+'</div>'});
+}
+function closeChangelog(){$('changelog-modal').classList.remove('open')}
+$('changelog-modal').onclick=e=>{if(e.target===$('changelog-modal'))closeChangelog()}
+function renderChangelog(items){
+  if(!items||!items.length){$('changelog-list').innerHTML='<div class="card-sub">No changelog entries yet.</div>';return}
+  $('changelog-list').innerHTML=items.map(item=>{
+    const fixed=(item.fixed||[]).map(x=>'<div class="card-sub">Fixed: '+he(x)+'</div>').join('');
+    const features=(item.features||[]).map(x=>'<div class="card-sub">Feature: '+he(x)+'</div>').join('');
+    const comments=(item.comments||[]).map(x=>'<div class="card-sub">Comment: '+he(x)+'</div>').join('');
+    const pr=item.prUrl?'<div class="card-sub"><a style="color:var(--primary)" href="'+he(item.prUrl)+'" target="_blank" rel="noopener">Pull request</a></div>':'';
+    return '<div class="change-card"><span class="'+severityClass(item.severity)+'">'+he(item.severity||'feature')+'</span><div class="change-title">'+he(item.title||'Update')+'</div><div class="card-sub">'+fmtDate(item.date)+'</div><div class="card-sub" style="margin-top:6px">Summary: '+he(item.summary||'No summary')+'</div><div class="card-sub">Cause: '+he(item.cause||'Not recorded')+'</div>'+fixed+features+comments+pr+'</div>';
+  }).join('');
+}
+
+function openImport(){
+  $('import-modal').classList.add('open');
+  $('world-upload-bar').style.width='0%';
+  $('world-upload-bar').textContent='';
+}
+function closeImport(){$('import-modal').classList.remove('open')}
+$('import-modal').onclick=e=>{if(e.target===$('import-modal'))closeImport()}
+function uploadWorldZip(file){
+  if(!file.name.toLowerCase().endsWith('.zip')){$('world-import-result').textContent='Choose a .zip file.';return}
+  const xhr=new XMLHttpRequest();
+  $('world-import-result').textContent='Uploading '+file.name+'...';
+  xhr.upload.onprogress=e=>{if(e.lengthComputable){const pct=Math.round(e.loaded/e.total*100);$('world-upload-bar').style.width=pct+'%';$('world-upload-bar').textContent=pct+'%'}};
+  xhr.onload=()=>{let d={};try{d=JSON.parse(xhr.responseText||'{}')}catch{} if(xhr.status>=200&&xhr.status<300&&d.ok){$('world-upload-bar').style.width='100%';$('world-upload-bar').textContent='Done';$('world-import-result').textContent='Imported world to '+d.target+'; detected '+d.detected.format+' with '+d.detected.regions+' regions.';}else{$('world-import-result').textContent='Import failed: '+(d.error||xhr.statusText||'unknown')}};
+  xhr.onerror=()=>{$('world-import-result').textContent='Import failed during upload.'};
+  xhr.open('POST','/api/world/import');
+  xhr.setRequestHeader('Content-Type','application/zip');
+  xhr.send(file);
+}
+const worldDrop=$('world-drop');
+worldDrop.addEventListener('dragover',e=>{e.preventDefault();worldDrop.classList.add('drag')});
+worldDrop.addEventListener('dragleave',()=>worldDrop.classList.remove('drag'));
+worldDrop.addEventListener('drop',e=>{e.preventDefault();worldDrop.classList.remove('drag');if(e.dataTransfer.files[0])uploadWorldZip(e.dataTransfer.files[0])});
 
 // Wizard
 function openWizard(){
@@ -774,24 +1014,50 @@ function wizLaunch(){
 
 // State manager
 function openState(){
-  fetch('/api/states').then(r=>r.json()).then(data=>{
-    let h='<div style="max-height:400px;overflow-y:auto">';
-    if(!data||!Object.keys(data).length)h+='<p style="font-size:.75rem;color:var(--text3)">No state files found.</p>';
-    else{
-      for(const [k,v] of Object.entries(data)){
-        const count=v&&v.visited?Object.keys(v.visited).length:0;
-        h+='<div class="stat-row"><span class="stat-l">'+he(k)+'</span><span class="stat-v">'+count+' visited</span></div>';
-      }
-    }
-    h+='</div>';
-    $('state-files').innerHTML=h;
-    $('state-modal').classList.add('open');
-  });
+  fetch('/api/states').then(r=>r.json()).then(data=>{renderStateManager(data);$('state-modal').classList.add('open')});
+}
+
+function stateCount(v){return v&&v.visited?Object.keys(v.visited).length:0}
+function stateJson(v){try{return JSON.stringify(v||{visited:{}},null,2)}catch{return '{}'}}
+function renderStateManager(data, selected){
+  stateCache=data||{};
+  const keys=Object.keys(stateCache).sort();
+  const current=(selected&&stateCache[selected]!==undefined)?selected:(keys[0]||'visited.json');
+  const currentData=stateCache[current]||{visited:{}};
+  let list='';
+  if(!keys.length) list='<div class="card-sub" style="margin-bottom:8px">No state files found. Create one below.</div>';
+  else list=keys.map(k=>'<button class="btn '+(k===current?'btn-f':'btn-o')+' btn-sm" style="margin:2px" onclick="stateSelect(\''+he(k).replace(/'/g,'&#39;')+'\')">'+he(k)+' ('+stateCount(stateCache[k])+')</button>').join('');
+  $('state-files').innerHTML='<div style="max-height:160px;overflow-y:auto;margin-bottom:10px">'+list+'</div>'
+    +'<div class="form-group"><label class="form-label">State File</label><input class="form-input" id="state-name" value="'+he(current)+'" placeholder="visited.json"></div>'
+    +'<div class="state-mgr"><textarea id="state-json" style="height:260px">'+he(stateJson(currentData))+'</textarea></div>'
+    +'<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap">'
+    +'<button class="btn btn-o btn-sm" onclick="stateNew()">New</button>'
+    +'<button class="btn btn-f btn-sm" onclick="stateSave()">Save</button>'
+    +'<button class="btn btn-o btn-sm btn-danger" onclick="stateDelete()">Delete</button>'
+    +'</div><div class="card-sub" id="state-result" style="margin-top:8px">Edit JSON, then Save.</div>';
+}
+function stateSelect(name){renderStateManager(stateCache,name)}
+function stateNew(){renderStateManager(stateCache,'visited.json');$('state-name').value='visited.json';$('state-json').value=JSON.stringify({visited:{}},null,2);$('state-result').textContent='New state ready. Rename if needed, then Save.'}
+function stateSave(){
+  let data;
+  try{data=JSON.parse($('state-json').value)}catch(e){$('state-result').textContent='Invalid JSON: '+e.message;return}
+  fetch('/api/states',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$('state-name').value,data})})
+    .then(r=>r.json()).then(d=>{if(d.ok)renderStateManager(d.states,d.file);else $('state-result').textContent='Save failed: '+(d.error||'unknown')})
+    .catch(e=>{$('state-result').textContent='Save failed: '+e.message});
+}
+function stateDelete(){
+  const name=$('state-name').value.trim();
+  if(!name){$('state-result').textContent='Choose a state file first.';return}
+  $('confirm-title').textContent='Delete State';
+  $('confirm-body').textContent='Delete '+name+'? This cannot be undone.';
+  $('confirm-danger-icon').style.display='block';
+  confirmCb=()=>fetch('/api/states/'+encodeURIComponent(name),{method:'DELETE'}).then(r=>r.json()).then(d=>{if(d.ok)renderStateManager(d.states);else $('state-result').textContent='Delete failed: '+(d.error||'unknown')}).catch(e=>{$('state-result').textContent='Delete failed: '+e.message});
+  $('confirm-modal').classList.add('open');
 }
 function closeState(){$('state-modal').classList.remove('open')}
 $('state-modal').onclick=e=>{if(e.target===$('state-modal'))closeState()}
 
-setInterval(()=>{$('clock').textContent=new Date().toLocaleString([], {hour12:false})},1000);
+setInterval(()=>{$('clock').textContent=new Date().toLocaleString('en-CA', {timeZone:TORONTO_TZ,hour12:false,timeZoneName:'short'})},1000);
 </script>
 </body>
 </html>
