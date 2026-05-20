@@ -1,12 +1,11 @@
 services:
   bluemap:
     image: ghcr.io/bluemap-minecraft/bluemap:latest
-    restart: unless-stopped
-    command: -r -f -u -w
-    ports:
-      - '8100:8100'
+    restart: "no"
+    command: -r
     volumes:
       - './config:/app/config'
+      - './config/webserver-off.conf:/app/config/webserver.conf'
       - '${WORLD_PATH:-./world}:/app/world'
       - './data:/app/data'
       - './web:/app/web'

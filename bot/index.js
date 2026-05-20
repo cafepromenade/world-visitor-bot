@@ -35,6 +35,14 @@ const MOVE_DELAY = readInt('MOVE_DELAY', 150, 0);
 const MOVE_REACH_DISTANCE = readInt('MOVE_REACH_DISTANCE', 8, 1);
 const SHUTDOWN_ON_COMPLETE = process.env.SHUTDOWN_ON_COMPLETE === 'true';
 const FOLLOW_PLAYER = process.env.FOLLOW_PLAYER || '';
+const BOT_ID = `bot${BOT_INDEX}`;
+const BOT_STATUS_DIR = path.join(STATE_DIR, 'bots');
+const BOT_STATUS_FILE = path.join(BOT_STATUS_DIR, `${BOT_ID}.json`);
+const BLUEMAP_MAP_CONFIG = process.env.BLUEMAP_MAP_CONFIG || '';
+const BLUEMAP_MARKERS_JSON = process.env.BLUEMAP_MARKERS_JSON || '';
+const BOT_PATH_MAX = readInt('BOT_PATH_MAX', 500, 2);
+const MARKER_START = '  # WORLD_VISITOR_BOT_MARKERS_START';
+const MARKER_END = '  # WORLD_VISITOR_BOT_MARKERS_END';
 
 let state;
 let todo = [];
@@ -43,9 +51,245 @@ let bot;
 let activeConnection = 0;
 let reconnectAttempts = 0;
 let shuttingDown = false;
+let botStatus = 'starting';
+let currentRegion = null;
+let currentWaypoint = null;
+let pathTrace = [];
+let lastStatusWriteAt = 0;
 
 function log(msg) {
   console.log(`[${new Date().toISOString()}] ${msg}`);
+}
+
+function ensureDir(dir) {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+
+function roundCoord(value) {
+  return Math.round(value * 10) / 10;
+}
+
+function currentPosition() {
+  if (!bot?.entity?.position) return null;
+  const p = bot.entity.position;
+  return { x: roundCoord(p.x), y: roundCoord(p.y), z: roundCoord(p.z) };
+}
+
+function appendPathPoint(pos) {
+  if (!pos) return;
+  const last = pathTrace[pathTrace.length - 1];
+  if (!last || Math.hypot(pos.x - last.x, pos.y - last.y, pos.z - last.z) >= 24) {
+    pathTrace.push(pos);
+    if (pathTrace.length > BOT_PATH_MAX) pathTrace = pathTrace.slice(-BOT_PATH_MAX);
+  }
+}
+
+function writeJsonAtomic(file, data) {
+  ensureDir(path.dirname(file));
+  const tmp = `${file}.${BOT_ID}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+  fs.renameSync(tmp, file);
+}
+
+function htmlEscape(value) {
+  return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function jsString(value) {
+  return JSON.stringify(String(value));
+}
+
+function hoconPos(pos) {
+  return `{ x: ${roundCoord(pos.x)}, y: ${roundCoord(pos.y)}, z: ${roundCoord(pos.z)} }`;
+}
+
+function isValidPosition(pos) {
+  return pos && Number.isFinite(pos.x) && Number.isFinite(pos.y) && Number.isFinite(pos.z);
+}
+
+function isoDate(value) {
+  const date = new Date(value || Date.now());
+  return Number.isFinite(date.getTime()) ? date.toISOString() : new Date().toISOString();
+}
+
+function readBotStatuses() {
+  try {
+    if (!fs.existsSync(BOT_STATUS_DIR)) return [];
+    return fs.readdirSync(BOT_STATUS_DIR)
+      .filter(f => f.endsWith('.json'))
+      .map(f => {
+        try { return JSON.parse(fs.readFileSync(path.join(BOT_STATUS_DIR, f), 'utf8')); }
+        catch { return null; }
+      })
+      .filter(s => isValidPosition(s?.position))
+      .sort((a, b) => (a.index || 0) - (b.index || 0));
+  } catch {
+    return [];
+  }
+}
+
+function buildBlueMapBotMarkerBlock(statuses) {
+  const lines = [
+    '  "world-visitor-bots": {',
+    '    label: "World Visitor Bots"',
+    '    toggleable: true',
+    '    default-hidden: false',
+    '    sorting: -100',
+    '    markers: {'
+  ];
+
+  statuses.forEach((s, idx) => {
+    const label = `${s.username || s.id} ${s.status || 'unknown'}`;
+    const pos = s.position;
+    const detail = `${htmlEscape(s.username || s.id)}<br>Status: ${htmlEscape(s.status || 'unknown')}<br>Region: ${htmlEscape(s.region || '-')}<br>Waypoint: ${htmlEscape(s.waypoint || '-')}<br>Updated: ${isoDate(s.updatedAt)}<br>Position: ${pos.x}, ${pos.y}, ${pos.z}`;
+    lines.push(`      "${s.id}-current": {`);
+    lines.push('        type: "html"');
+    lines.push(`        position: ${hoconPos(pos)}`);
+    lines.push(`        label: ${jsString(label)}`);
+    lines.push(`        html: ${jsString(`<div style='transform:translate(-50%,-100%);background:#34a853;color:#fff;border:2px solid #fff;border-radius:12px;padding:3px 8px;font:700 12px sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.45);'>${htmlEscape(s.username || s.id)}</div>`)}`);
+    lines.push(`        detail: ${jsString(detail)}`);
+    lines.push('        anchor: { x: 0, y: 0 }');
+    lines.push(`        sorting: ${idx}`);
+    lines.push('        listed: true');
+    lines.push('      }');
+
+    const trace = Array.isArray(s.path) ? s.path.filter(p => Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z)) : [];
+    if (trace.length >= 2) {
+      const center = trace.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y, z: acc.z + p.z }), { x: 0, y: 0, z: 0 });
+      center.x /= trace.length; center.y /= trace.length; center.z /= trace.length;
+      lines.push(`      "${s.id}-path": {`);
+      lines.push('        type: "line"');
+      lines.push(`        position: ${hoconPos(center)}`);
+      lines.push(`        label: ${jsString(`${s.username || s.id} path`)}`);
+      lines.push('        line: [');
+      trace.forEach(p => lines.push(`          ${hoconPos(p)}`));
+      lines.push('        ]');
+      lines.push(`        detail: ${jsString(`${htmlEscape(s.username || s.id)} movement trace (${trace.length} points)`)}`);
+      lines.push('        depth-test: false');
+      lines.push('        line-width: 4');
+      lines.push(`        line-color: ${idx % 4 === 0 ? '{ r: 52, g: 168, b: 83, a: 0.9 }' : idx % 4 === 1 ? '{ r: 66, g: 133, b: 244, a: 0.9 }' : idx % 4 === 2 ? '{ r: 251, g: 188, b: 4, a: 0.9 }' : '{ r: 234, g: 67, b: 53, a: 0.9 }'}`);
+      lines.push(`        sorting: ${idx + 100}`);
+      lines.push('        listed: true');
+      lines.push('      }');
+    }
+  });
+
+  lines.push('    }');
+  lines.push('  }');
+  return lines.join('\n');
+}
+
+function buildBlueMapLiveMarkerSet(statuses) {
+  const markers = {};
+  statuses.forEach((s, idx) => {
+    const pos = s.position;
+    const label = `${s.username || s.id} ${s.status || 'unknown'}`;
+    markers[`${s.id}-current`] = {
+      type: 'html',
+      label,
+      position: pos,
+      anchor: { x: 0, y: 0 },
+      html: `<div style='transform:translate(-50%,-100%);background:#34a853;color:#fff;border:2px solid #fff;border-radius:12px;padding:3px 8px;font:700 12px sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.45);'>${htmlEscape(s.username || s.id)}</div>`,
+      sorting: idx,
+      listed: true
+    };
+    const trace = Array.isArray(s.path) ? s.path.filter(isValidPosition) : [];
+    if (trace.length >= 2) {
+      const center = trace.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y, z: acc.z + p.z }), { x: 0, y: 0, z: 0 });
+      center.x = roundCoord(center.x / trace.length);
+      center.y = roundCoord(center.y / trace.length);
+      center.z = roundCoord(center.z / trace.length);
+      markers[`${s.id}-path`] = {
+        type: 'line',
+        label: `${s.username || s.id} path`,
+        position: center,
+        line: trace,
+        depthTest: false,
+        lineWidth: 4,
+        lineColor: idx % 4 === 0 ? { r: 52, g: 168, b: 83, a: 0.9 } : idx % 4 === 1 ? { r: 66, g: 133, b: 244, a: 0.9 } : idx % 4 === 2 ? { r: 251, g: 188, b: 4, a: 0.9 } : { r: 234, g: 67, b: 53, a: 0.9 },
+        sorting: idx + 100,
+        listed: true
+      };
+    }
+  });
+  return { label: 'World Visitor Bots', toggleable: true, defaultHidden: false, sorting: -100, markers };
+}
+
+function replaceBlueMapMarkerBlock(config, block) {
+  const replacement = `${MARKER_START}\n${block}\n${MARKER_END}`;
+  const start = config.indexOf(MARKER_START);
+  const end = config.indexOf(MARKER_END);
+  if (start !== -1 && end !== -1 && end > start) {
+    return `${config.slice(0, start)}${replacement}${config.slice(end + MARKER_END.length)}`;
+  }
+
+  const insertAt = config.lastIndexOf('\n}');
+  if (insertAt === -1) return config;
+  return `${config.slice(0, insertAt)}\n${replacement}${config.slice(insertAt)}`;
+}
+
+function updateBlueMapMarkerConfig() {
+  updateBlueMapLiveMarkers();
+  if (!BLUEMAP_MAP_CONFIG || !fs.existsSync(BLUEMAP_MAP_CONFIG)) return;
+  const lockFile = `${BLUEMAP_MAP_CONFIG}.visitor-lock`;
+  let lockFd = null;
+  try {
+    try {
+      const stat = fs.statSync(lockFile);
+      if (Date.now() - stat.mtimeMs > 10000) fs.unlinkSync(lockFile);
+    } catch {}
+    lockFd = fs.openSync(lockFile, 'wx');
+    const config = fs.readFileSync(BLUEMAP_MAP_CONFIG, 'utf8');
+    const next = replaceBlueMapMarkerBlock(config, buildBlueMapBotMarkerBlock(readBotStatuses()));
+    if (next !== config) fs.writeFileSync(BLUEMAP_MAP_CONFIG, next);
+  } catch (err) {
+    if (err.code !== 'EEXIST') log(`WARN: failed to update BlueMap marker config: ${err.message}`);
+  } finally {
+    if (lockFd !== null) {
+      try { fs.closeSync(lockFd); } catch {}
+      try { fs.unlinkSync(lockFile); } catch {}
+    }
+  }
+}
+
+function updateBlueMapLiveMarkers() {
+  if (!BLUEMAP_MARKERS_JSON) return;
+  try {
+    const statuses = readBotStatuses();
+    let current = {};
+    try { current = JSON.parse(fs.readFileSync(BLUEMAP_MARKERS_JSON, 'utf8')); } catch {}
+    current['world-visitor-bots'] = buildBlueMapLiveMarkerSet(statuses);
+    writeJsonAtomic(BLUEMAP_MARKERS_JSON, current);
+  } catch (err) {
+    log(`WARN: failed to update BlueMap live markers: ${err.message}`);
+  }
+}
+
+function writeBotStatus(status, force = false) {
+  const now = Date.now();
+  if (!force && now - lastStatusWriteAt < 1000) return;
+  lastStatusWriteAt = now;
+  botStatus = status || botStatus;
+  const pos = currentPosition();
+  if (pos) appendPathPoint(pos);
+  const record = {
+    id: BOT_ID,
+    index: BOT_INDEX,
+    count: BOT_COUNT,
+    username: MC_USERNAME_FULL,
+    status: botStatus,
+    position: pos || pathTrace[pathTrace.length - 1] || null,
+    region: currentRegion,
+    waypoint: currentWaypoint,
+    updatedAt: new Date(now).toISOString(),
+    path: pathTrace
+  };
+  try {
+    writeJsonAtomic(BOT_STATUS_FILE, record);
+    updateBlueMapMarkerConfig();
+  } catch (err) {
+    log(`WARN: failed to write bot status: ${err.message}`);
+  }
 }
 
 function chat(msg) {
@@ -75,6 +319,7 @@ function init() {
 
   if (todo.length === 0) {
     log('All regions already visited. Nothing to do.');
+    writeBotStatus('complete', true);
     process.exit(0);
   }
 
@@ -83,6 +328,7 @@ function init() {
   log(`Render distance: ${RENDER_DISTANCE}  Flight Y: ${FLY_Y}  Grid step: ${GRID_STEP} blocks`);
   log(`Chunk check radius: ${CHUNK_CHECK_RADIUS}  Chunk load timeout: ${CHUNK_LOAD_TIMEOUT}ms`);
   log(`Movement mode: ${MOVE_MODE}  Step: ${MOVE_STEP} blocks  Delay: ${MOVE_DELAY}ms`);
+  writeBotStatus('connecting', true);
 
   connect();
 }
@@ -103,6 +349,7 @@ function shutdown(reason) {
   shuttingDown = true;
   log(`Received ${reason}. Saving progress and disconnecting...`);
   saveProgress('shutdown');
+  writeBotStatus('stopping', true);
   try { bot?.end(); } catch {}
   setTimeout(() => process.exit(0), 1000);
 }
@@ -145,6 +392,7 @@ function onPlayerJoined(player) {
 function onSpawn(connId) {
   if (connId !== activeConnection) return;
   log('Bot spawned. Starting flight mode...');
+  writeBotStatus('spawned', true);
   reconnectAttempts = 0;
   chat(`/gamemode creative ${MC_USERNAME_FULL}`);
   if (FOLLOW_PLAYER) {
@@ -155,6 +403,7 @@ function onSpawn(connId) {
     if (connId !== activeConnection) return;
     bot.creative.startFlying();
     log('Flying enabled. Starting region visits in 3s...');
+    writeBotStatus('flying', true);
     setTimeout(() => processNext(connId), 3000);
   }, 2000);
 }
@@ -169,6 +418,7 @@ function onError(err) {
 
 function onEnd() {
   log('Connection ended');
+  writeBotStatus(shuttingDown ? 'stopped' : 'disconnected', true);
   if (shuttingDown) {
     process.exit(0);
     return;
@@ -176,12 +426,15 @@ function onEnd() {
   if (idx < todo.length && reconnectAttempts < 10) {
     reconnectAttempts++;
     log(`Reconnecting in 10s... (attempt ${reconnectAttempts}/10)`);
+    writeBotStatus('reconnecting', true);
     setTimeout(connect, 10000);
   } else if (idx >= todo.length) {
     log('All regions visited. Exiting.');
+    writeBotStatus('complete', true);
     process.exit(0);
   } else {
     log('Max reconnect attempts reached. Exiting.');
+    writeBotStatus('failed', true);
     process.exit(1);
   }
 }
@@ -257,12 +510,14 @@ async function moveToWaypoint(connId, target) {
     const z = start.z + dz * t;
     if (followPlayer) tpCommand(followPlayer, x, y + 5, z);
     tpCommand(MC_USERNAME_FULL, x, y, z);
+    writeBotStatus('moving');
     if (step < steps || MOVE_DELAY > 0) {
       await delay(MOVE_DELAY);
     }
   }
 
   const arrived = await waitForPosition(target);
+  writeBotStatus(arrived ? 'arrived' : 'moving', true);
   if (!arrived && bot.entity) {
     const pos = bot.entity.position;
     log(`WARN: movement target not reached. Target=(${target.x}, ${target.y}, ${target.z}) Position=(${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)})`);
@@ -290,7 +545,10 @@ async function waitForChunksLoaded(connId) {
     for (let dx = -radius; dx <= radius; dx += step) {
       for (let dz = -radius; dz <= radius; dz += step) {
         total++;
-        if (!bot.world.getColumn(cx + dx, cz + dz)) {
+        const column = typeof bot.world.getLoadedColumn === 'function'
+          ? bot.world.getLoadedColumn(cx + dx, cz + dz)
+          : bot.world.getColumn(cx + dx, cz + dz);
+        if (!column) {
           allLoaded = false;
           missing++;
         }
@@ -311,12 +569,17 @@ async function flyRegion(connId, target, index) {
   const half = regionSize / 2;
   const waypoints = buildFlightGrid(target.cx, target.cz, half);
   const start = Date.now();
+  currentRegion = `${target.rx},${target.rz}`;
+  currentWaypoint = `0/${waypoints.length}`;
+  writeBotStatus('region', true);
 
   log(`[${index}/${todo.length}] Region (${target.rx}, ${target.rz}) @ (${target.cx}, ${FLY_Y}, ${target.cz}) - ${waypoints.length} waypoints`);
 
   for (let i = 0; i < waypoints.length; i++) {
     if (connId !== activeConnection) return;
     const wp = waypoints[i];
+    currentWaypoint = `${i + 1}/${waypoints.length}`;
+    writeBotStatus('waypoint', true);
 
     await moveToWaypoint(connId, wp);
 
@@ -334,6 +597,7 @@ async function flyRegion(connId, target, index) {
 
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
   log(`[${index}/${todo.length}] Region (${target.rx}, ${target.rz}) complete in ${elapsed}s`);
+  writeBotStatus('region-complete', true);
 }
 
 async function processNext(connId) {
@@ -343,6 +607,7 @@ async function processNext(connId) {
     log('All regions visited! Saving state...');
     regions.saveState(STATE_FILE, state);
     log('Done.');
+    writeBotStatus('complete', true);
     if (SHUTDOWN_ON_COMPLETE) {
       log('Shutting down server in 10s...');
       await delay(10000);
@@ -357,6 +622,8 @@ async function processNext(connId) {
   const current = idx + 1;
   const target = todo[idx];
   const key = regions.regionKey(target.rx, target.rz);
+  currentRegion = `${target.rx},${target.rz}`;
+  currentWaypoint = null;
 
   if (state.visited && state.visited[key]) {
     log(`[${current}/${todo.length}] Already visited (${target.rx},${target.rz}) - skipping`);
@@ -366,6 +633,7 @@ async function processNext(connId) {
   }
 
   try {
+    writeBotStatus('to-region', true);
     await moveToWaypoint(connId, { x: target.cx, y: FLY_Y, z: target.cz });
     await delay(REGION_DELAY);
     if (connId !== activeConnection) return;
@@ -378,6 +646,7 @@ async function processNext(connId) {
     saveProgress('region complete');
   } catch (err) {
     log(`Error in region (${target.rx},${target.rz}): ${err.message}`);
+    writeBotStatus('error', true);
     try { chat(`Error: ${err.message}`); } catch {}
     if (!bot.entity) return;
   }

@@ -23,14 +23,22 @@ services:
       JVM_OPTS: "-DPaper.useAtomicWorldMove=false"
       MAX_TICK_TIME: "-1"
       LEVEL: "world"
-      MODRINTH_PROJECTS: "viaversion,viabackwards"
+      MODRINTH_PROJECTS: "viaversion,viabackwards,paper:bluemap?"
     ports:
       - "${MC_PORT:-25565}:25565"
+      - "8100:8100"
     volumes:
       - './mc-data:/data'
       - './config/spigot.yml:/data/spigot.yml'
+      - './config:/data/plugins/BlueMap'
+      - './web:/data/plugins/BlueMap/web'
+      - './data:/data/plugins/BlueMap/data'
+      - './web:/data/web'
+      - './data:/data/data'
+      - '${WORLD_PATH:-./mc-data/world}:/app/world:ro'
 
   visitor:
+    image: world-visitor-bot-visitor:latest
     build: ./bot
     restart: "no"
     mem_limit: "${BOT_MEMORY:-2G}"
@@ -56,6 +64,7 @@ services:
       - MOVE_STEP=${MOVE_STEP:-32}
       - MOVE_DELAY=${MOVE_DELAY:-150}
       - FOLLOW_PLAYER=${FOLLOW_PLAYER:-}
+      - BLUEMAP_MARKERS_JSON=/app/bluemap-web/maps/overworld/live/markers.json
       - SHUTDOWN_ON_COMPLETE=true
       - BOT_COUNT=${BOT_COUNT:-1}
       - BOT_INDEX=0
@@ -63,8 +72,11 @@ services:
       - '${WORLD_PATH:-./mc-data/world}:/repo/world:ro'
       - './.git:/repo/.git:ro'
       - './state:/app/state'
+      - './config:/app/bluemap-config'
+      - './web:/app/bluemap-web'
 
   visitor1:
+    image: world-visitor-bot-visitor:latest
     build: ./bot
     restart: "no"
     mem_limit: "${BOT_MEMORY:-2G}"
@@ -92,6 +104,7 @@ services:
       - MOVE_STEP=${MOVE_STEP:-32}
       - MOVE_DELAY=${MOVE_DELAY:-150}
       - FOLLOW_PLAYER=${FOLLOW_PLAYER:-}
+      - BLUEMAP_MARKERS_JSON=/app/bluemap-web/maps/overworld/live/markers.json
       - SHUTDOWN_ON_COMPLETE=false
       - BOT_COUNT=${BOT_COUNT:-2}
       - BOT_INDEX=1
@@ -99,8 +112,11 @@ services:
       - '${WORLD_PATH:-./mc-data/world}:/repo/world:ro'
       - './.git:/repo/.git:ro'
       - './state:/app/state'
+      - './config:/app/bluemap-config'
+      - './web:/app/bluemap-web'
 
   visitor2:
+    image: world-visitor-bot-visitor:latest
     build: ./bot
     restart: "no"
     mem_limit: "${BOT_MEMORY:-2G}"
@@ -128,6 +144,7 @@ services:
       - MOVE_STEP=${MOVE_STEP:-32}
       - MOVE_DELAY=${MOVE_DELAY:-150}
       - FOLLOW_PLAYER=${FOLLOW_PLAYER:-}
+      - BLUEMAP_MARKERS_JSON=/app/bluemap-web/maps/overworld/live/markers.json
       - SHUTDOWN_ON_COMPLETE=false
       - BOT_COUNT=${BOT_COUNT:-3}
       - BOT_INDEX=2
@@ -135,8 +152,11 @@ services:
       - '${WORLD_PATH:-./mc-data/world}:/repo/world:ro'
       - './.git:/repo/.git:ro'
       - './state:/app/state'
+      - './config:/app/bluemap-config'
+      - './web:/app/bluemap-web'
 
   visitor3:
+    image: world-visitor-bot-visitor:latest
     build: ./bot
     restart: "no"
     mem_limit: "${BOT_MEMORY:-2G}"
@@ -164,6 +184,7 @@ services:
       - MOVE_STEP=${MOVE_STEP:-32}
       - MOVE_DELAY=${MOVE_DELAY:-150}
       - FOLLOW_PLAYER=${FOLLOW_PLAYER:-}
+      - BLUEMAP_MARKERS_JSON=/app/bluemap-web/maps/overworld/live/markers.json
       - SHUTDOWN_ON_COMPLETE=false
       - BOT_COUNT=${BOT_COUNT:-4}
       - BOT_INDEX=3
@@ -171,13 +192,13 @@ services:
       - '${WORLD_PATH:-./mc-data/world}:/repo/world:ro'
       - './.git:/repo/.git:ro'
       - './state:/app/state'
+      - './config:/app/bluemap-config'
+      - './web:/app/bluemap-web'
 
   bluemap:
     image: ghcr.io/bluemap-minecraft/bluemap:latest
-    restart: always
-    command: -r -f -u -w
-    ports:
-      - '8100:8100'
+    restart: "no"
+    command: -r
     volumes:
       - './config:/app/config'
       - '${WORLD_PATH:-./world}:/app/world'
@@ -186,4 +207,4 @@ services:
       - './world_nether:/app/world_nether'
       - './world_the_end:/app/world_the_end'
     profiles:
-      - bluemap
+      - cli

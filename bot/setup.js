@@ -17,7 +17,7 @@ async function main() {
   const y = await prompt(`Flight altitude Y [120]: `) || '120';
   const step = await prompt(`Grid step size in blocks - smaller = more thorough, larger = faster [80]: `) || '80';
   const bmHost = await prompt(`BlueMap host [localhost]: `) || 'localhost';
-  const bmPort = await prompt(`BlueMap port [8100]: `) || '8100';
+  const bmPort = '8100';
   const bmMap = await prompt(`BlueMap map name [overworld]: `) || 'overworld';
 
   const envContent = [

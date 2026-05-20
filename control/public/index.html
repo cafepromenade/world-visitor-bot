@@ -40,13 +40,14 @@ body{font-family:'Google Sans','Inter',sans-serif;background:var(--bg);color:var
 .btn-o{background:transparent;color:var(--text);border:1px solid var(--border)}
 .btn-sm{padding:4px 10px;font-size:.68rem;border-radius:14px}
 .btn-danger{color:var(--red);border-color:var(--red)44}
+.btn:disabled{opacity:.45;cursor:not-allowed}
 
 .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin:10px 0}
 .grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin:10px 0}
 
-.card{background:var(--card);border-radius:var(--radius);padding:16px;border:1px solid var(--border);transition:all var(--t);animation:cardIn .5s var(--spring) forwards}
+.card{background:var(--card);border-radius:var(--radius);padding:16px;border:1px solid var(--border);transition:border-color var(--t),box-shadow var(--t)}
 @keyframes cardIn{from{opacity:0;transform:translateY(12px) scale(.97)}to{opacity:1;transform:none}}
-.card:hover{border-color:var(--accent)44;transform:translateY(-2px);box-shadow:0 8px 30px rgba(0,0,0,.3)}
+.card:hover{border-color:var(--accent)44;box-shadow:0 8px 30px rgba(0,0,0,.3)}
 .card-hd{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 .card-ttl{font-size:.85rem;font-weight:500}
 .card-sub{font-size:.68rem;color:var(--text2)}
@@ -67,6 +68,9 @@ body{font-family:'Google Sans','Inter',sans-serif;background:var(--bg);color:var
 .bar-fill::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.15),transparent);animation:shimmer 2s infinite}
 @keyframes shimmer{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
 .progress-meta{display:flex;justify-content:space-between;font-size:.7rem;color:var(--text3)}
+.done-check{display:none;width:48px;height:48px;border-radius:50%;border:3px solid var(--green);margin:0 auto 10px;position:relative;animation:checkPop .45s var(--spring)}
+.done-check::after{content:'';position:absolute;left:13px;top:9px;width:14px;height:24px;border:solid var(--green);border-width:0 4px 4px 0;transform:rotate(45deg)}
+@keyframes checkPop{from{transform:scale(.45);opacity:0}to{transform:scale(1);opacity:1}}
 
 .conn-card{border:2px dashed var(--border);text-align:center;padding:18px;transition:all var(--t)}
 .conn-card.running{border-color:var(--green);border-style:solid;background:var(--green)06}
@@ -244,11 +248,25 @@ body{font-family:'Google Sans','Inter',sans-serif;background:var(--bg);color:var
   <div class="modal-overlay" id="prune-modal">
     <div class="modal"><div class="modal-inner">
       <h2 style="font-size:1rem;font-weight:500;margin-bottom:4px">Pruning</h2>
+      <div class="done-check" id="prune-check"></div>
       <p style="font-size:.75rem;color:var(--text2);margin-bottom:12px" id="prune-msg">Preparing...</p>
       <div class="bar"><div class="bar-fill" id="prune-bar" style="width:0%"></div></div>
       <div id="prune-log" style="font:400 .65rem/1.5 'Google Sans Mono',monospace;color:var(--text3);max-height:160px;overflow-y:auto;margin-top:10px"></div>
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
         <button class="btn btn-o" id="prune-close" style="display:none" onclick="closePrune()">Close</button>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- Operation Progress Modal -->
+  <div class="modal-overlay" id="op-modal">
+    <div class="modal"><div class="modal-inner">
+      <h2 style="font-size:1rem;font-weight:500;margin-bottom:4px">Working</h2>
+      <p style="font-size:.75rem;color:var(--text2);margin-bottom:12px" id="op-msg">Preparing...</p>
+      <div class="bar"><div class="bar-fill" id="op-bar" style="width:0%"></div></div>
+      <div id="op-log" style="font:400 .65rem/1.5 'Google Sans Mono',monospace;color:var(--text3);max-height:160px;overflow-y:auto;margin-top:10px"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+        <button class="btn btn-o" id="op-close" style="display:none" onclick="closeOp()">Close</button>
       </div>
     </div></div>
   </div>
@@ -262,10 +280,11 @@ body{font-family:'Google Sans','Inter',sans-serif;background:var(--bg);color:var
     <div class="topbar-actions">
       <button class="btn btn-f" onclick="openWizard()">Setup</button>
       <button class="btn btn-t" onclick="openState()">States</button>
-      <button class="btn btn-f" style="background:var(--green)" onclick="act('run-bot')">Run the Bot</button>
-      <button class="btn btn-o btn-danger" onclick="confirmAction('stop-all','Stop all services? MC server and bots will shut down.')">Stop</button>
-      <button class="btn btn-o btn-danger" onclick="confirmDanger('force-stop','Force stop all containers immediately? This is a hard shutdown and can interrupt saves or rendering.')">Force Stop</button>
-      <button class="btn btn-o btn-danger" onclick="confirmAction('prune','Prune all containers and rebuild? This will remove containers and rebuild the bot image.')">Prune</button>
+      <button class="btn btn-t" id="open-bluemap-btn" onclick="openBlueMap()">Open BlueMap</button>
+      <button class="btn btn-f" id="run-bot-btn" style="background:var(--green)" onclick="act('run-bot')">Run the Bot</button>
+      <button class="btn btn-o btn-danger" id="stop-btn" onclick="confirmAction('stop-all','Stop all services? MC server and bots will shut down.')">Stop</button>
+      <button class="btn btn-o btn-danger" id="force-stop-btn" onclick="confirmDanger('force-stop','Force stop all containers immediately? This is a hard shutdown and can interrupt saves or rendering.')">Force Stop</button>
+      <button class="btn btn-o btn-danger" id="prune-btn" onclick="confirmAction('prune','Prune all containers and rebuild? This will remove containers and rebuild the bot image.')">Prune</button>
     </div>
   </div>
 
@@ -289,6 +308,21 @@ body{font-family:'Google Sans','Inter',sans-serif;background:var(--bg);color:var
 
   <div class="grid3" id="cards"></div>
   <div class="grid3" id="stats-cards"></div>
+
+  <div class="card">
+    <div class="card-hd"><span class="card-ttl">How To Read This</span></div>
+    <div class="card-sub">Run the Bot starts Minecraft with the BlueMap plugin inside the server and starts the visitors. Open BlueMap opens the live plugin map while Minecraft is online, or the last CLI/offline render when Minecraft is stopped. Bot locations appear below and in BlueMap under the marker set named World Visitor Bots. CLI BlueMap is only for offline final renders.</div>
+  </div>
+
+  <div class="card" id="bot-locations-card" style="display:none">
+    <div class="card-hd"><span class="card-ttl">Bot Locations</span></div>
+    <div class="card-sub" id="marker-status" style="margin-bottom:8px">BlueMap marker set: World Visitor Bots</div>
+    <div class="cmd-box" style="margin-bottom:8px">
+      <input class="cmd-input" id="tp-player" placeholder="Player to teleport">
+      <button class="btn btn-f btn-sm" onclick="teleportToFirstBot()">Teleport</button>
+    </div>
+    <div id="bot-locations"></div>
+  </div>
 
   <div class="card progress-card" id="prog-card" style="display:none">
     <div class="progress-top"><h2>Visit Progress</h2><span class="progress-pct" id="prog-pct">0%</span></div>
@@ -321,8 +355,10 @@ body{font-family:'Google Sans','Inter',sans-serif;background:var(--bg);color:var
 const $=id=>document.getElementById(id);
 const sio=io();
 let confirmCb=null, wizStep=0, wizFollow=[], wizBotNames=[], wizBotMem=[];
+let lastStatus=null;
+let busy=false;
 
-function act(cmd){sio.emit('action',cmd)}
+function act(cmd, force){if(busy&&!force)return; sio.emit('action',cmd)}
 function confirmAction(cmd,msg){
   $('confirm-title').textContent='Confirm'; $('confirm-body').textContent=msg;
   $('confirm-danger-icon').style.display='none';
@@ -333,8 +369,11 @@ function confirmAction(cmd,msg){
       $('prune-bar').style.width='0%';
       $('prune-log').innerHTML='';
       $('prune-close').style.display='none';
+      $('prune-check').style.display='none';
+    } else if(cmd==='stop-all'){
+      openOp('Stopping stack...');
     }
-    act(cmd);
+    act(cmd,true);
   };
   $('confirm-modal').classList.add('open');
 }
@@ -342,7 +381,7 @@ function confirmDanger(cmd,msg){
   $('confirm-title').textContent='Danger Zone';
   $('confirm-body').textContent=msg;
   $('confirm-danger-icon').style.display='block';
-  confirmCb=()=>act(cmd);
+  confirmCb=()=>{if(cmd==='force-stop')openOp('Force stopping stack...');act(cmd,true)};
   $('confirm-modal').classList.add('open');
 }
 function closeConfirm(){$('confirm-modal').classList.remove('open');confirmCb=null}
@@ -351,6 +390,12 @@ $('confirm-modal').onclick=e=>{if(e.target===$('confirm-modal'))closeConfirm()}
 
 function closePrune(){$('prune-modal').classList.remove('open')}
 $('prune-modal').onclick=e=>{if(e.target===$('prune-modal'))closePrune()}
+function openOp(msg){busy=true;$('op-modal').classList.add('open');$('op-msg').textContent=msg;$('op-bar').style.width='0%';$('op-bar').textContent='';$('op-log').innerHTML='';$('op-close').style.display='none';setBusyButtons(true)}
+function closeOp(){$('op-modal').classList.remove('open')}
+$('op-modal').onclick=e=>{if(e.target===$('op-modal')&&!busy)closeOp()}
+function setBusyButtons(on){
+  ['run-bot-btn','stop-btn','force-stop-btn','prune-btn'].forEach(id=>{const el=$(id); if(el)el.disabled=on});
+}
 
 function sendCmd(){
   const inp=$('cmd-input'); const cmd=inp.value.trim();
@@ -384,6 +429,60 @@ sio.on('bmlog',d=>renderLog($('bm-log-box'),d));
 
 let activeTab='controls';
 
+function openBlueMap(){
+  const bm=lastStatus&&lastStatus.bluemapInfo;
+  if(!bm||!bm.available){renderLog($('log-box'),{msg:'BlueMap is not available yet.',level:'e'});return}
+  const url=bm.mode==='web'?'http://'+location.hostname+':'+bm.port:bm.staticUrl;
+  window.open(url,'_blank','noopener');
+}
+
+function botAge(updatedAt){
+  const t=Date.parse(updatedAt||'');
+  if(!t)return 'unknown';
+  const sec=Math.max(0,Math.round((Date.now()-t)/1000));
+  if(sec<60)return sec+'s ago';
+  const min=Math.floor(sec/60);
+  if(min<60)return min+'m ago';
+  return Math.floor(min/60)+'h ago';
+}
+
+function renderMarkerInfo(info){
+  if(!info){$('marker-status').textContent='BlueMap marker set: World Visitor Bots';return}
+  const updated=info.updatedAt?botAge(info.updatedAt):'not written yet';
+  $('marker-status').textContent=(info.present?'BlueMap markers updated ':'BlueMap markers pending ') + updated + ' - marker set: ' + info.set;
+}
+
+function fmtPos(p){return Math.round(p.x)+', '+Math.round(p.y)+', '+Math.round(p.z)}
+
+function teleportToBot(id){
+  const player=$('tp-player').value.trim();
+  if(!/^[A-Za-z0-9_]{1,16}$/.test(player)){renderLog($('log-box'),{msg:'Enter a valid Minecraft player name first.',level:'e'});return}
+  sio.emit('action','tp-bot:'+encodeURIComponent(player)+':'+encodeURIComponent(id));
+}
+
+function teleportToFirstBot(){
+  const bots=(lastStatus&&lastStatus.bots)||[];
+  if(!bots.length){renderLog($('log-box'),{msg:'No bot location is available yet.',level:'e'});return}
+  teleportToBot(bots[0].id);
+}
+
+function renderBots(bots){
+  if(!bots||!bots.length){
+    $('bot-locations-card').style.display='';
+    const running=lastStatus&&(lastStatus.visitor==='running'||lastStatus.visitor==='starting');
+    $('bot-locations').innerHTML='<div class="card-sub">'+(running?'Waiting for live bot location files. If visitors were already running before this update, stop and run the bot stack once so the new tracker starts.':'No bot is publishing a live location yet. Run the Bot to start live location tracking.')+'</div>';
+    renderMarkerInfo(lastStatus&&lastStatus.markerInfo);
+    return;
+  }
+  $('bot-locations-card').style.display='';
+  $('bot-locations').innerHTML=bots.map(b=>{
+    const id=he(b.id).replace(/'/g,'&#39;');
+    const p=b.position||{x:0,y:0,z:0};
+    const sub=(b.region?'region '+he(b.region):'no region')+(b.waypoint?' - wp '+he(b.waypoint):'')+' - '+botAge(b.updatedAt);
+    return '<div class="stat-row"><span class="stat-l"><b>'+he(b.username)+'</b><br><small>'+sub+'</small></span><span class="stat-v">'+fmtPos(p)+' <button class="btn btn-t btn-sm" onclick="teleportToBot(\''+id+'\')">TP</button></span></div>';
+  }).join('');
+}
+
 function renderStats(stats,status){
   if(!stats||!Object.keys(stats).length){$('stats-cards').innerHTML='';return}
   let h='';
@@ -405,8 +504,10 @@ function setTheme(s){
 }
 
 function render(s){
+  lastStatus=s;
   setTheme(s);
   const botState = (s.mc==='running' || s.visitor==='running') ? 'running' : (s.mc==='starting' || s.visitor==='starting') ? 'starting' : 'stopped';
+  const botStarted = botState !== 'stopped';
   const svcs=[
     {k:'bot',l:'Bot Stack',icon:'&#129302;',state:botState},
     {k:'bluemap',l:'BlueMap',icon:'&#128506;',state:s.bluemap||'stopped'}
@@ -423,14 +524,29 @@ function render(s){
     const bmDisabledWhy = bmDisabled ? 'BlueMap auto-runs with bot' : '';
     const startCmd = sv.k==='bot' ? 'run-bot' : 'start-bluemap';
     const stopCmd = sv.k==='bot' ? 'stop-all' : 'stop-bluemap';
+    const startDisabled = busy || (sv.k==='bot' ? botStarted : (botRunning || st !== 'stopped'));
 
+    const bmOpen = isBlueMap && s.bluemapInfo && s.bluemapInfo.available;
     h+='<div class="card"><div class="card-hd"><span class="dot '+st+'"></span><span class="card-ttl">'+sv.icon+' '+sv.l+'</span></div><div class="card-sub" style="color:'+stColor+'">'+stLabel+'</div>'
       + (bmDisabledWhy ? '<div style="font-size:.6rem;color:var(--text3);margin-top:2px">'+bmDisabledWhy+'</div>' : '')
       + '<div style="display:flex;gap:4px;margin-top:8px">'
-      + '<button class="btn btn-o btn-sm" style="color:var(--green);border-color:var(--green)44" onclick="act(\''+startCmd+'\')"'+ (bmDisabled?' disabled':'') +'>'+(sv.k==='bot'?'Run':'Start')+'</button>'
+      + '<button class="btn btn-o btn-sm" style="color:var(--green);border-color:var(--green)44" onclick="act(\''+startCmd+'\')"'+ (startDisabled?' disabled':'') +'>'+(sv.k==='bot'?'Run':'Start')+'</button>'
+      + (isBlueMap?'<button class="btn btn-t btn-sm" onclick="openBlueMap()"'+(bmOpen?'':' disabled')+'>Open</button>':'')
       + '<button class="btn btn-o btn-sm" style="color:var(--red);border-color:var(--red)44" onclick="confirmAction(\''+stopCmd+'\',\'Stop '+sv.l+'?\')"'+ (bmDisabled?' disabled':'') +'>Stop</button></div></div>';
   }
   $('cards').innerHTML=h;
+
+  if(!busy){
+    $('run-bot-btn').disabled=botStarted;
+    $('stop-btn').disabled=!botStarted && s.bluemap==='stopped';
+    $('force-stop-btn').disabled=!botStarted && s.bluemap==='stopped';
+    $('prune-btn').disabled=false;
+  }
+
+  if(s.bluemapInfo){
+    $('open-bluemap-btn').disabled=!s.bluemapInfo.available;
+    $('open-bluemap-btn').textContent=s.bluemapInfo.mode==='web'?'Open Live BlueMap':s.bluemapInfo.mode==='cli'?'Open CLI BlueMap':'Open BlueMap';
+  }
 
   const p=s.progress||{};
   if(!p.total) $('prog-card').style.display='none';
@@ -453,6 +569,8 @@ function render(s){
   $('eta-total').textContent=eta.total||'--';
 
   if(s.stats)renderStats(s.stats,s);
+  renderMarkerInfo(s.markerInfo);
+  renderBots(s.bots||[]);
 
   if(s.conn){
     const mcRunning = s.mc === 'running';
@@ -486,10 +604,28 @@ sio.on('prune-step',d=>{
 });
 
 sio.on('prune-done',d=>{
-  $('prune-msg').textContent=d.ok?'Prune complete!':'Prune failed';
+  $('prune-msg').textContent=d.ok?'Prune complete! Cleared '+(d.reclaimed||'0 B'):'Prune failed';
   $('prune-bar').style.width='100%';
   $('prune-bar').textContent=d.ok?'Done':'Failed';
+  $('prune-check').style.display=d.ok?'block':'none';
   $('prune-close').style.display='';
+});
+
+sio.on('op-step',d=>{
+  const pct=Math.round(d.step/d.total*100);
+  $('op-bar').style.width=pct+'%';
+  $('op-bar').textContent=pct+'%';
+  $('op-msg').textContent=d.msg;
+  $('op-log').innerHTML+='<span class="i">'+he(d.msg)+'</span>'+(d.detail?'\n<span class="m">'+he(d.detail)+'</span>':'')+'\n';
+  $('op-log').scrollTop=$('op-log').scrollHeight;
+});
+sio.on('op-done',d=>{
+  busy=false;
+  $('op-msg').textContent=d.msg||'Complete';
+  $('op-bar').style.width='100%';
+  $('op-bar').textContent=d.ok?'Done':'Failed';
+  $('op-close').style.display='';
+  setBusyButtons(false);
 });
 
 function copyAddr(){

@@ -23,14 +23,22 @@ services:
       JVM_OPTS: "-DPaper.useAtomicWorldMove=false"
       MAX_TICK_TIME: "-1"
       LEVEL: "world"
-      MODRINTH_PROJECTS: "viaversion,viabackwards"
+      MODRINTH_PROJECTS: "viaversion,viabackwards,paper:bluemap?"
     ports:
       - "${MC_PORT:-25566}:25565"
+      - "8100:8100"
     volumes:
       - './mc-data-new:/data'
       - './config/spigot.yml:/data/spigot.yml'
+      - './config:/data/plugins/BlueMap'
+      - './web:/data/plugins/BlueMap/web'
+      - './data:/data/plugins/BlueMap/data'
+      - './web:/data/web'
+      - './data:/data/data'
+      - '${WORLD_PATH:-./mc-data-new/world}:/app/world:ro'
 
   visitor-new:
+    image: world-visitor-bot-visitor:latest
     build: ./bot
     restart: "no"
     depends_on:
@@ -55,6 +63,7 @@ services:
       - MOVE_STEP=${MOVE_STEP:-32}
       - MOVE_DELAY=${MOVE_DELAY:-150}
       - FOLLOW_PLAYER=${FOLLOW_PLAYER:-}
+      - BLUEMAP_MARKERS_JSON=/app/bluemap-web/maps/overworld/live/markers.json
       - BOT_COUNT=${BOT_COUNT:-1}
       - BOT_INDEX=0
       - SHUTDOWN_ON_COMPLETE=true
@@ -62,4 +71,5 @@ services:
       - '${WORLD_PATH:-./mc-data-new/world}:/repo/world:ro'
       - './.git:/repo/.git:ro'
       - './state:/app/state'
-
+      - './config:/app/bluemap-config'
+      - './web:/app/bluemap-web'

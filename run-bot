@@ -155,13 +155,13 @@ fi
 
 # ----- Launch -----
 if [ -n "$DETACH" ]; then
-  echo "[...] Starting Minecraft server + ${BOT_COUNT} bot(s) + BlueMap..."
+  echo "[...] Starting Minecraft server + ${BOT_COUNT} bot(s) + integrated BlueMap..."
   echo "      Use 'docker compose logs -f' to follow output."
   echo "      Use 'docker compose stop' to stop."
   echo ""
   UP_FLAGS="-d"
 else
-  echo "[...] Starting Minecraft server + ${BOT_COUNT} bot(s) + BlueMap..."
+  echo "[...] Starting Minecraft server + ${BOT_COUNT} bot(s) + integrated BlueMap..."
   echo "     Press Ctrl+C to stop."
   echo ""
   UP_FLAGS="--abort-on-container-exit"
@@ -169,15 +169,23 @@ fi
 
 case "$BOT_COUNT" in
   1)
-    exec docker compose up $UP_FLAGS mc visitor bluemap
+    docker compose stop bluemap 2>/dev/null || true
+    docker compose rm -sf bluemap 2>/dev/null || true
+    exec docker compose up $UP_FLAGS mc visitor
     ;;
   2)
-    exec docker compose --profile multi up $UP_FLAGS mc visitor visitor1 bluemap
+    docker compose stop bluemap 2>/dev/null || true
+    docker compose rm -sf bluemap 2>/dev/null || true
+    exec docker compose --profile multi up $UP_FLAGS mc visitor visitor1
     ;;
   3)
-    exec docker compose --profile multi up $UP_FLAGS mc visitor visitor1 visitor2 bluemap
+    docker compose stop bluemap 2>/dev/null || true
+    docker compose rm -sf bluemap 2>/dev/null || true
+    exec docker compose --profile multi up $UP_FLAGS mc visitor visitor1 visitor2
     ;;
   4)
-    exec docker compose --profile multi up $UP_FLAGS mc visitor visitor1 visitor2 visitor3 bluemap
+    docker compose stop bluemap 2>/dev/null || true
+    docker compose rm -sf bluemap 2>/dev/null || true
+    exec docker compose --profile multi up $UP_FLAGS mc visitor visitor1 visitor2 visitor3
     ;;
 esac

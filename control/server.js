@@ -4,15 +4,20 @@ const { Server } = require('socket.io');
 const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const net = require('net');
 
 const PROJECT_DIR = process.env.PROJECT_DIR || '/app/project';
 const PORT = parseInt(process.env.PORT || '80');
 const PORT2 = parseInt(process.env.PORT2 || '3000');
 const DOMAIN = process.env.DOMAIN || 'bigheados.com';
-const BLUEMAP_PORT = process.env.BLUEMAP_PORT || '8100';
+const BLUEMAP_PORT = '8100';
 const MC_PORT = '25565';
 const envPath = path.join(PROJECT_DIR, '.env');
 const stateDir = path.join(PROJECT_DIR, 'state');
+const bluemapWebDir = path.join(PROJECT_DIR, 'web');
+const bluemapMapConfig = path.join(PROJECT_DIR, 'config', 'maps', 'overworld.conf');
+const bluemapMarkersJson = path.join(bluemapWebDir, 'maps', 'overworld', 'live', 'markers.json');
+const COMPOSE_PROJECT = process.env.COMPOSE_PROJECT_NAME || path.basename(PROJECT_DIR);
 const ALL_VISITOR_SERVICES = ['visitor', 'visitor1', 'visitor2', 'visitor3'];
 const ALL_MANAGED_SERVICES = ['mc', ...ALL_VISITOR_SERVICES, 'bluemap'];
 
@@ -20,6 +25,7 @@ let etaData = { regionsStarted: 0, firstRegionAt: null, lastRegionAt: null, wpTo
 let seenMcLogs = [];
 let seenBmLogs = [];
 let seenVisitorLogs = [];
+let logBotStatuses = new Map();
 
 function getLocalIP() {
   const provided = process.env.HOST_IP;
@@ -37,6 +43,15 @@ function getConnectionInfo() {
   return { primary: DOMAIN, fallback: LOCAL_IP, port: MC_PORT };
 }
 
+function getBlueMapUrls() {
+  return {
+    primary: `http://${DOMAIN}:${BLUEMAP_PORT}`,
+    fallback: `http://${LOCAL_IP}:${BLUEMAP_PORT}`,
+    port: BLUEMAP_PORT,
+    staticUrl: '/bluemap/'
+  };
+}
+
 function getBotCount() {
   const parsed = parseInt(readEnv().BOT_COUNT || process.env.BOT_COUNT || '1', 10);
   if (!Number.isFinite(parsed)) return 1;
@@ -48,7 +63,7 @@ function visitorServices(count = getBotCount()) {
 }
 
 function botStackServices(count = getBotCount()) {
-  return ['mc', ...visitorServices(count), 'bluemap'];
+  return ['mc', ...visitorServices(count)];
 }
 
 function composeProfile(count = getBotCount()) {
@@ -93,13 +108,104 @@ function run(cmd, quiet) {
   });
 }
 
+function prepareWritableDirs() {
+  const dirs = ['data', 'web', 'state', 'config'].map(d => shQuote(path.join(PROJECT_DIR, d))).join(' ');
+  const cmd = `mkdir -p ${dirs} && chown -R 1000:1000 ${dirs} 2>/dev/null || true; chmod -R u+rwX,g+rwX ${dirs} 2>/dev/null || true`;
+  console.log('[run] preparing writable BlueMap/bot directories');
+  return new Promise(resolve => {
+    exec(cmd, { timeout: 180000, maxBuffer: 1024*1024*10 }, (err, stdout, stderr) => {
+      resolve({ ok: !err, stdout: stdout||'', stderr: stderr||'' });
+    });
+  });
+}
+
+function isTcpOpen(host, port, timeout = 1200) {
+  return new Promise(resolve => {
+    const socket = net.createConnection({ host, port, timeout }, () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.on('error', () => resolve(false));
+    socket.on('timeout', () => { socket.destroy(); resolve(false); });
+  });
+}
+
+async function getServiceStatusByLabel(service, quiet) {
+  const filters = `--filter ${shQuote(`label=com.docker.compose.project=${COMPOSE_PROJECT}`)} --filter ${shQuote(`label=com.docker.compose.service=${service}`)}`;
+  const { stdout } = await run(`docker ps -a ${filters} --format '{{.Status}}' 2>/dev/null`, quiet);
+  return aggregateComposeStatus(stdout);
+}
+
+async function getServiceContainerByLabel(service, quiet) {
+  const filters = `--filter ${shQuote(`label=com.docker.compose.project=${COMPOSE_PROJECT}`)} --filter ${shQuote(`label=com.docker.compose.service=${service}`)}`;
+  const { stdout } = await run(`docker ps -a ${filters} --format '{{.Names}}' 2>/dev/null`, quiet);
+  return stdout.trim().split('\n').filter(Boolean)[0] || '';
+}
+
+async function getManagedContainerNames(quiet) {
+  const names = [];
+  for (const service of ALL_MANAGED_SERVICES) {
+    const filters = `--filter ${shQuote(`label=com.docker.compose.project=${COMPOSE_PROJECT}`)} --filter ${shQuote(`label=com.docker.compose.service=${service}`)}`;
+    const { stdout } = await run(`docker ps -a ${filters} --format '{{.Names}}' 2>/dev/null`, quiet);
+    names.push(...stdout.trim().split('\n').filter(Boolean));
+  }
+  return [...new Set(names)];
+}
+
+async function getContainerWritableBytes(names, quiet) {
+  if (!names.length) return 0;
+  const { stdout } = await run(`docker inspect --size --format '{{.SizeRw}}' ${names.map(shQuote).join(' ')} 2>/dev/null`, quiet);
+  return stdout.split('\n').reduce((sum, line) => sum + (parseInt(line, 10) || 0), 0);
+}
+
+function formatBytes(bytes) {
+  if (!bytes) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return `${value >= 10 || unit === 0 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
+}
+
+async function getBlueMapMode(status, quiet) {
+  if (await isTcpOpen('mc', parseInt(BLUEMAP_PORT, 10))) return 'web';
+  const container = await getServiceContainerByLabel('bluemap', quiet);
+  if (!container || status.bluemap !== 'running') return '';
+  const { stdout } = await run(`docker inspect --format '{{json .Config.Cmd}}' ${shQuote(container)} 2>/dev/null`, quiet);
+  let cmd = [];
+  try { cmd = JSON.parse(stdout.trim() || '[]'); } catch {}
+  return cmd.includes('-w') ? 'web' : 'cli';
+}
+
+async function getBlueMapInfo(status, quiet) {
+  const urls = getBlueMapUrls();
+  const staticAvailable = fs.existsSync(path.join(bluemapWebDir, 'index.html'));
+  const mode = await getBlueMapMode(status, quiet);
+  if (mode === 'web') {
+    return { available: true, mode, label: 'Live BlueMap', ...urls };
+  }
+  if (mode === 'cli') {
+    return { available: staticAvailable, mode, label: 'CLI BlueMap render output', ...urls };
+  }
+  if (staticAvailable) {
+    return { available: true, mode: 'static', label: 'Last BlueMap render output', ...urls };
+  }
+  return { available: false, mode: 'none', label: 'BlueMap is not available yet', ...urls };
+}
+
 async function getStatus(quiet) {
-  const [mc, vis, bm] = await Promise.all([
+  const [mc, vis, bmLabel] = await Promise.all([
     run(`docker compose --project-directory ${PROJECT_DIR} ps mc --format '{{.Status}}' 2>/dev/null`, quiet),
     run(`docker compose --project-directory ${PROJECT_DIR} ps ${ALL_VISITOR_SERVICES.join(' ')} --format '{{.Status}}' 2>/dev/null`, quiet),
-    run(`docker compose --project-directory ${PROJECT_DIR} ps bluemap --format '{{.Status}}' 2>/dev/null`, quiet),
+    getServiceStatusByLabel('bluemap', quiet),
   ]);
-  return { mc: parseComposeStatus(mc.stdout), visitor: aggregateComposeStatus(vis.stdout), bluemap: parseComposeStatus(bm.stdout) };
+  let mcStatus = parseComposeStatus(mc.stdout);
+  if (mcStatus === 'running' && !(await isTcpOpen('mc', 25565))) mcStatus = 'starting';
+  const liveBlueMap = await isTcpOpen('mc', parseInt(BLUEMAP_PORT, 10));
+  return { mc: mcStatus, visitor: aggregateComposeStatus(vis.stdout), bluemap: liveBlueMap ? 'running' : bmLabel };
 }
 
 async function getStats(quiet) {
@@ -121,7 +227,8 @@ function getProgress() {
   try {
     if (!fs.existsSync(stateDir)) return { regions:0,total:0,rx:0,rz:0,pct:0 };
     const files = fs.readdirSync(stateDir).filter(f => f.startsWith('visited') && f.endsWith('.json'));
-    if (!files.length) return { regions:0,total:0,rx:0,rz:0,pct:0 };
+    const worldTotal = countWorldRegions();
+    if (!files.length) return { regions:0,total:worldTotal,rx:0,rz:0,pct:0 };
     const visited = new Set(); let maxTotal=0, rx=0, rz=0;
     for (const f of files) {
       try {
@@ -134,9 +241,100 @@ function getProgress() {
       const parts = [...visited].pop().split(',');
       rx = parseInt(parts[0])||0; rz = parseInt(parts[1])||0;
     }
-    const pct = maxTotal > 0 ? Math.min(100, Math.round(visited.size/Math.max(maxTotal,visited.size)*100)) : 0;
-    return { regions: visited.size, total: maxTotal||visited.size, rx, rz, pct };
+    const total = worldTotal || maxTotal || visited.size;
+    const pct = total > 0 ? Math.min(100, Math.round(visited.size/Math.max(total,visited.size)*100)) : 0;
+    return { regions: visited.size, total, rx, rz, pct };
   } catch { return { regions:0,total:0,rx:0,rz:0,pct:0 }; }
+}
+
+function countWorldRegions() {
+  const cfg = readEnv();
+  const rawWorldPath = cfg.WORLD_PATH || './mc-data/world';
+  const worldPath = path.isAbsolute(rawWorldPath) ? rawWorldPath : path.resolve(PROJECT_DIR, rawWorldPath);
+  const dirs = [
+    path.join(worldPath, 'dimensions', 'minecraft', 'overworld', 'region'),
+    path.join(worldPath, 'region')
+  ];
+  for (const dir of dirs) {
+    try {
+      if (fs.existsSync(dir)) return fs.readdirSync(dir).filter(f => /^r\.-?\d+\.-?\d+\.mca$/.test(f)).length;
+    } catch {}
+  }
+  return 0;
+}
+
+function getBotStatuses() {
+  const dir = path.join(stateDir, 'bots');
+  try {
+    const fallback = new Map(logBotStatuses);
+    const merge = status => {
+      if (!status?.id || !status?.position) return;
+      const existing = fallback.get(status.id);
+      if (!existing || Date.parse(status.updatedAt || '') >= Date.parse(existing.updatedAt || '')) {
+        fallback.set(status.id, status);
+      }
+    };
+    if (!fs.existsSync(dir)) return [...fallback.values()].sort((a, b) => (a.index || 0) - (b.index || 0));
+    fs.readdirSync(dir)
+      .filter(f => f.endsWith('.json'))
+      .map(f => {
+        try { return JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); }
+        catch { return null; }
+      })
+      .forEach(merge);
+    return [...fallback.values()].filter(s => s?.id && s?.position && Number.isFinite(s.position.x) && Number.isFinite(s.position.y) && Number.isFinite(s.position.z)).map(s => ({
+        id: String(s.id),
+        index: Number.isFinite(s.index) ? s.index : 0,
+        username: String(s.username || s.id),
+        status: String(s.status || 'unknown'),
+        position: s.position,
+        region: s.region || '',
+        waypoint: s.waypoint || '',
+        updatedAt: s.updatedAt || '',
+      }))
+      .sort((a, b) => a.index - b.index);
+  } catch {
+    return [...logBotStatuses.values()];
+  }
+}
+
+function updateBotStatusFromLog(line) {
+  const prefixed = line.match(/^([A-Za-z0-9_-]+)\s+\|\s+(.*)$/);
+  const source = prefixed ? prefixed[1] : 'visitor';
+  const msg = prefixed ? prefixed[2] : line;
+  const serviceMatch = source.match(/visitor(\d*)/);
+  if (!serviceMatch) return;
+  const index = serviceMatch[1] ? parseInt(serviceMatch[1], 10) : 0;
+  const id = `bot${index}`;
+  const cfg = readEnv();
+  const username = `${cfg.MC_USERNAME || 'Bot'}${getBotCount() > 1 ? index : ''}`;
+  const current = logBotStatuses.get(id) || { id, index, username, status: 'running', position: null, updatedAt: '', region: '', waypoint: '' };
+  const waypoint = msg.match(/waypoint\s+(\d+)\/(\d+)\s+@\s+\((-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)\)/);
+  const region = msg.match(/Region\s+\((-?\d+),\s*(-?\d+)\)\s+@\s+\((-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)\)/);
+  const match = waypoint || region;
+  if (!match) return;
+  const offset = waypoint ? 3 : 3;
+  current.status = waypoint ? 'waypoint' : 'region';
+  current.position = { x: parseFloat(match[offset]), y: parseFloat(match[offset + 1]), z: parseFloat(match[offset + 2]) };
+  if (waypoint) current.waypoint = `${match[1]}/${match[2]}`;
+  if (region) current.region = `${match[1]},${match[2]}`;
+  current.updatedAt = new Date().toISOString();
+  logBotStatuses.set(id, current);
+}
+
+function getMarkerInfo() {
+  try {
+    if (!fs.existsSync(bluemapMarkersJson)) return { present: false, updatedAt: '', set: 'World Visitor Bots' };
+    const markers = JSON.parse(fs.readFileSync(bluemapMarkersJson, 'utf8'));
+    const stat = fs.statSync(bluemapMarkersJson);
+    return {
+      present: Boolean(markers['world-visitor-bots']),
+      updatedAt: stat.mtime.toISOString(),
+      set: 'World Visitor Bots'
+    };
+  } catch {
+    return { present: false, updatedAt: '', set: 'World Visitor Bots' };
+  }
 }
 
 function getETA() {
@@ -233,6 +431,7 @@ async function syncVisitorLogs(ios) {
       if (seenVisitorLogs.includes(line)) continue;
       seenVisitorLogs.push(line);
       if (seenVisitorLogs.length > 200) seenVisitorLogs.shift();
+      updateBotStatusFromLog(line);
       ios.forEach(io => io.emit('visitor-log', { msg: line.slice(0,500) }));
 
       // Parse waypoint progress: "waypoint 3/9 @"
@@ -268,6 +467,8 @@ async function doPrune(ios) {
 
   emit(1, 5, 'Checking running containers...', '');
   elog(ios, 'Prune: scanning containers', 'info');
+  const beforeNames = await getManagedContainerNames(true);
+  const beforeBytes = await getContainerWritableBytes(beforeNames, true);
   const status = await getStatus();
   const running = Object.entries(status).filter(([,s]) => s === 'running');
 
@@ -291,9 +492,27 @@ async function doPrune(ios) {
   const br = await compose('build visitor');
   emit(4, 5, br.ok ? 'Build complete' : 'Build FAILED', br.stdout.slice(-300) || br.stderr.slice(-300));
 
-  emit(5, 5, 'Prune complete', '');
-  ios.forEach(io => io.emit('prune-done', { ok: br.ok }));
-  elog(ios, br.ok ? 'Prune complete - services not started' : 'Prune FAILED', br.ok ? 'done' : 'error');
+  const reclaimed = formatBytes(beforeBytes);
+  emit(5, 5, 'Prune complete', `Estimated container writable space cleared: ${reclaimed}`);
+  ios.forEach(io => io.emit('prune-done', { ok: br.ok, reclaimed }));
+  elog(ios, br.ok ? `Prune complete - ${reclaimed} cleared, services not started` : 'Prune FAILED', br.ok ? 'done' : 'error');
+}
+
+async function doStop(ios, force = false) {
+  const emit = (step, total, msg, detail) => ios.forEach(io => io.emit('op-step', { step, total, msg, detail: detail || '' }));
+  emit(1, 4, force ? 'Force stopping visitor bots...' : 'Stopping visitor bots...', 'This prevents duplicate actions while containers shut down.');
+  elog(ios, force ? 'Force stopping stack...' : 'Stopping stack...', 'info');
+  const stopCmd = force ? 'kill' : 'stop';
+  let r = await compose(`${stopCmd} ${ALL_VISITOR_SERVICES.join(' ')} 2>/dev/null`);
+  emit(2, 4, 'Visitor bots stopped', r.stdout.slice(-500) || r.stderr.slice(-500) || 'done');
+  r = await compose(`${stopCmd} mc 2>/dev/null`);
+  emit(3, 4, 'Minecraft server stopped', r.stdout.slice(-500) || r.stderr.slice(-500) || 'done');
+  r = await compose(`${stopCmd} bluemap 2>/dev/null`);
+  if (force) await compose('rm -sf ' + ALL_MANAGED_SERVICES.join(' '));
+  emit(4, 4, 'Stop complete', r.stdout.slice(-500) || r.stderr.slice(-500) || 'BlueMap CLI was not running');
+  ios.forEach(io => io.emit('op-done', { ok: true, msg: 'Stop complete' }));
+  elog(ios, 'Stop complete', 'done');
+  await pushAllClients(ios);
 }
 
 async function doAction(ios, cmd) {
@@ -305,25 +524,50 @@ async function doAction(ios, cmd) {
     elog(ios, result.slice(0,300), 'm');
     return;
   }
+  if (cmd.startsWith('tp-bot:')) {
+    const [, playerRaw, botRaw] = cmd.split(':');
+    const player = decodeURIComponent(playerRaw || '').trim();
+    const botId = decodeURIComponent(botRaw || '').trim();
+    if (!/^[A-Za-z0-9_]{1,16}$/.test(player)) {
+      elog(ios, 'Teleport failed: enter a valid Minecraft player name.', 'e');
+      return;
+    }
+    const target = getBotStatuses().find(b => b.id === botId);
+    if (!target) {
+      elog(ios, 'Teleport failed: bot location is not available yet.', 'e');
+      return;
+    }
+    const p = target.position;
+    const tpCmd = `tp ${player} ${Math.round(p.x)} ${Math.round(p.y)} ${Math.round(p.z)}`;
+    elog(ios, `Teleporting ${player} to ${target.username}...`, 'info');
+    const result = await runServerCommand(tpCmd);
+    ios.forEach(io => io.emit('cmd-result', result));
+    elog(ios, result.slice(0,300), 'm');
+    return;
+  }
   if (cmd === 'force-stop') {
-    elog(ios, 'Force stopping all bot containers...', 'info');
-    await compose('kill ' + ALL_MANAGED_SERVICES.join(' ') + ' 2>/dev/null');
-    await compose('rm -sf ' + ALL_MANAGED_SERVICES.join(' '));
-    elog(ios, 'Force stop complete', 'done');
-    await pushAllClients(ios); return;
+    await doStop(ios, true); return;
   }
   elog(ios, '> '+cmd, 'info');
   let r;
   switch (cmd) {
     case 'run-bot':
     case 'start-all': {
+      const status = await getStatus(true);
+      if (status.mc !== 'stopped' || status.visitor !== 'stopped') {
+        elog(ios, 'Bot stack is already running or starting.', 'warn');
+        break;
+      }
       const count = getBotCount();
+      await prepareWritableDirs();
+      await compose('stop bluemap 2>/dev/null');
+      await compose('rm -sf bluemap 2>/dev/null');
       r = await compose(`${composeProfile(count)}up -d ${botStackServices(count).join(' ')}`);
       etaData = { regionsStarted:0, firstRegionAt:null, lastRegionAt:null, wpTotal:0, wpDone:0, wpStart:null };
       elog(ios, r.ok?`Bot stack started (${count} bot${count===1?'':'s'})`:'FAILED: '+(r.stderr||'').slice(-200), r.ok?'done':'error');
       break;
     }
-    case 'stop-all': r = await compose('stop ' + ALL_MANAGED_SERVICES.join(' ')); elog(ios, 'All stopped', 'done'); break;
+    case 'stop-all': await doStop(ios, false); return;
     case 'prune': await doPrune(ios); return;
     case 'start-mc': elog(ios, 'Start MC directly is disabled. Use Run the Bot.', 'warn'); break;
     case 'stop-mc': r = await compose('stop mc'); elog(ios, 'MC stopped', 'done'); break;
@@ -332,10 +576,15 @@ async function doAction(ios, cmd) {
     case 'start-bluemap': {
       const status = await getStatus(true);
       if (status.mc !== 'stopped' || status.visitor !== 'stopped') {
-        elog(ios, 'Standalone BlueMap can only start when the bot stack is stopped.', 'warn');
+        elog(ios, 'CLI BlueMap is offline-only. Use Open BlueMap while the Minecraft server is running.', 'warn');
         break;
       }
-      r = await compose('up -d --no-deps bluemap'); elog(ios, 'BlueMap started', 'done'); break;
+      if (status.bluemap !== 'stopped') {
+        elog(ios, 'BlueMap is already running or starting.', 'warn');
+        break;
+      }
+      await prepareWritableDirs();
+      r = await compose('--profile cli up -d bluemap'); elog(ios, 'BlueMap CLI render started', 'done'); break;
     }
     case 'stop-bluemap': r = await compose('stop bluemap'); elog(ios, 'BlueMap stopped', 'done'); break;
     case 'build': await compose('build visitor'); elog(ios, 'Build done', 'done'); break;
@@ -346,7 +595,8 @@ async function doAction(ios, cmd) {
 
 async function pushAll(io, quiet) {
   const [status, progress, stats] = await Promise.all([getStatus(quiet), Promise.resolve(getProgress()), getStats(quiet)]);
-  io.emit('status', { ...status, progress, stats, eta: getETA(), conn: getConnectionInfo() });
+  const bluemapInfo = await getBlueMapInfo(status, quiet);
+  io.emit('status', { ...status, progress, stats, eta: getETA(), conn: getConnectionInfo(), bluemapInfo, bots: getBotStatuses(), markerInfo: getMarkerInfo() });
 }
 
 async function pushAllClients(ios, quiet) {
@@ -361,6 +611,13 @@ function setupServer(p) {
 
 function mountRoutes(app, ios) {
   app.use(express.static(path.join(__dirname, 'public')));
+  app.get(/^\/bluemap$/, (req, res) => res.redirect('/bluemap/'));
+  app.use('/bluemap', express.static(bluemapWebDir));
+  app.get('/bluemap/*', (req, res) => {
+    const index = path.join(bluemapWebDir, 'index.html');
+    if (fs.existsSync(index)) res.sendFile(index);
+    else res.status(404).send('BlueMap web output is not available yet.');
+  });
   app.get('/api/env', (req, res) => res.json(readEnv()));
   app.get('/api/states', (req, res) => {
     const states = {};
