@@ -270,9 +270,10 @@ body{font-family:'Google Sans','Inter',sans-serif;background:var(--bg);color:var
   <div class="grid2">
     <div class="card conn-card" id="conn-card">
       <div class="conn-label">Server offline</div>
-      <div class="conn-addr" id="conn-addr" style="display:none"></div>
-      <div style="font-size:.65rem;color:var(--text3);margin-top:4px" id="conn-fallback"></div>
+      <div class="conn-addr" id="conn-addr" style="display:none;cursor:pointer" onclick="copyAddr()" title="Click to copy"></div>
+      <div style="font-size:.65rem;color:var(--text3);margin-top:2px" id="conn-fallback"></div>
       <div style="font-size:.68rem;color:var(--text3)" id="conn-status">Start the server to see connection details</div>
+      <button class="btn btn-o btn-sm" id="conn-copy-btn" style="display:none;margin-top:6px" onclick="copyAddr()">Copy Address</button>
     </div>
     <div class="card">
       <div class="card-hd"><span class="card-ttl">Console</span></div>
@@ -293,10 +294,11 @@ body{font-family:'Google Sans','Inter',sans-serif;background:var(--bg);color:var
     <div class="progress-meta"><span id="prog-regions">0/0 regions</span><span id="prog-pos"></span></div>
   </div>
 
-  <div class="tabs">
+  <div class="tabs" style="position:relative">
     <button class="tab active" onclick="switchTab('controls')">Control Log</button>
     <button class="tab" onclick="switchTab('mc')">MC Server Log</button>
     <button class="tab" onclick="switchTab('bluemap')">BlueMap Log</button>
+    <button class="btn btn-o btn-sm" style="margin-left:auto" onclick="exportLogs(activeTab)" title="Export current log">Export</button>
   </div>
   <div class="log-box" id="log-box" style="height:270px">Connecting...</div>
   <div class="log-box" id="mc-log-box" style="height:270px;display:none">Waiting for MC server logs...</div>
@@ -359,10 +361,13 @@ sio.on('log',d=>renderLog($('log-box'),d));
 sio.on('mclog',d=>renderLog($('mc-log-box'),d));
 sio.on('bmlog',d=>renderLog($('bm-log-box'),d));
 
-function renderStats(stats){
+let activeTab='controls';
+
+function renderStats(stats,status){
   if(!stats||!Object.keys(stats).length){$('stats-cards').innerHTML='';return}
   let h='';
   for(const [name,s] of Object.entries(stats)){
+    if(status[name]!=='running') continue;
     const label=name==='mc'?'MC Server':name==='visitor'?'Visitor':'BlueMap';
     h+='<div class="card"><div class="card-hd"><span class="card-ttl">'+label+'</span></div><div class="stat-row"><span class="stat-l">CPU</span><span class="stat-v">'+s.cpu.trim()+'</span></div><div class="stat-row"><span class="stat-l">Memory</span><span class="stat-v">'+s.mem.trim()+'</span></div><div class="stat-row"><span class="stat-l">Network</span><span class="stat-v">'+s.net.trim()+'</span></div></div>';
   }
@@ -388,7 +393,9 @@ function render(s){
   let h='';
   for(const sv of svcs){
     const st=s[sv.k]||'stopped';
-    h+='<div class="card"><div class="card-hd"><span class="dot '+st+'"></span><span class="card-ttl">'+sv.icon+' '+sv.l+'</span></div><div class="card-sub">'+st.toUpperCase()+'</div><div style="display:flex;gap:4px;margin-top:8px"><button class="btn btn-o btn-sm" style="color:var(--green);border-color:var(--green)44" onclick="act(\'start-'+sv.k+'\')">Start</button><button class="btn btn-o btn-sm" style="color:var(--red);border-color:var(--red)44" onclick="act(\'stop-'+sv.k+'\')">Stop</button></div></div>';
+    const stLabel = st==='running'?'RUNNING':st==='starting'?'STARTING':'STOPPED';
+    const stColor = st==='running'?'var(--green)':st==='starting'?'var(--yellow)':'var(--red)';
+    h+='<div class="card"><div class="card-hd"><span class="dot '+st+'"></span><span class="card-ttl">'+sv.icon+' '+sv.l+'</span></div><div class="card-sub" style="color:'+stColor+'">'+stLabel+'</div><div style="display:flex;gap:4px;margin-top:8px"><button class="btn btn-o btn-sm" style="color:var(--green);border-color:var(--green)44" onclick="act(\'start-'+sv.k+'\')">Start</button><button class="btn btn-o btn-sm" style="color:var(--red);border-color:var(--red)44" onclick="act(\'stop-'+sv.k+'\')">Stop</button></div></div>';
   }
   $('cards').innerHTML=h;
 
@@ -403,7 +410,7 @@ function render(s){
     $('prog-pos').textContent=p.rx||p.rz?'r.'+p.rx+','+p.rz:'';
   }
 
-  if(s.stats)renderStats(s.stats);
+  if(s.stats)renderStats(s.stats,s);
 
   if(s.conn){
     const mcRunning = s.mc === 'running';
@@ -412,11 +419,13 @@ function render(s){
       $('conn-addr').style.display = '';
       $('conn-addr').textContent = s.conn.primary + ':' + s.conn.port;
       $('conn-fallback').textContent = 'or ' + s.conn.fallback + ':' + s.conn.port;
-      $('conn-status').textContent = 'Connect now';
+      $('conn-status').textContent = 'Click address to copy';
+      $('conn-copy-btn').style.display = '';
     } else {
       $('conn-addr').style.display = 'none';
       $('conn-fallback').textContent = '';
       $('conn-status').textContent = 'Start the server to see connection details';
+      $('conn-copy-btn').style.display = 'none';
     }
   }
 }
@@ -439,6 +448,23 @@ sio.on('prune-done',d=>{
   $('prune-bar').textContent=d.ok?'Done':'Failed';
   $('prune-close').style.display='';
 });
+
+function copyAddr(){
+  const addr = $('conn-addr').textContent;
+  if(!addr||addr==='--')return;
+  navigator.clipboard.writeText(addr).then(()=>{
+    $('conn-status').textContent='Copied!'; setTimeout(()=>{$('conn-status').textContent='Click address to copy'},2000);
+  });
+}
+
+function exportLogs(tab){
+  const el = tab==='controls'?$('log-box'):tab==='mc'?$('mc-log-box'):$('bm-log-box');
+  const text = (el._l||[]).join('\n').replace(/<[^>]*>/g,'');
+  const blob = new Blob([text],{type:'text/plain'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'visitor-log-'+tab+'-'+new Date().toISOString().slice(0,19)+'.txt';
+  a.click();
+}
 
 // Wizard
 function openWizard(){
