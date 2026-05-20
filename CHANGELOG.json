@@ -17,6 +17,7 @@
       "Multiple queued requests can be batched into one branch for combined processing",
       "Watcher panel shows task-in-progress, processing queue, pending merge, and merged fix lists with elapsed time and ETA",
       "Queued tasks can be removed with a confirmation dialog",
+      "Failed automated tasks retry up to five times before being marked failed",
       "Completed fixes auto-merge to main after five minutes unless rejected",
       "Changelog modal shows dated entries colored by severity",
       "World zip import auto-detects classic and dimensions world roots"

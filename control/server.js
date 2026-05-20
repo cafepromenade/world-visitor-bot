@@ -33,7 +33,7 @@ const ALL_MANAGED_SERVICES = ['mc', ...ALL_VISITOR_SERVICES, 'bluemap'];
 const BUG_WATCHER_ENABLED = envFlag('BUG_WATCHER_ENABLED', true);
 const BUG_WATCHER_INTERVAL_MS = Math.max(30000, parseInt(process.env.BUG_WATCHER_INTERVAL_MS || '60000', 10) || 60000);
 const BUG_WATCHER_TREAT_WARNINGS = envFlag('BUG_WATCHER_TREAT_WARNINGS_AS_ERRORS', true);
-const BUG_WATCHER_MAX_ATTEMPTS = Math.max(1, parseInt(process.env.BUG_WATCHER_MAX_ATTEMPTS || '3', 10) || 3);
+const BUG_WATCHER_MAX_ATTEMPTS = Math.max(1, parseInt(process.env.BUG_WATCHER_MAX_ATTEMPTS || '5', 10) || 5);
 const OPENCODE_AUTOFIX = envFlag('OPENCODE_AUTOFIX', true);
 const OPENCODE_SKIP_PERMISSIONS = envFlag('OPENCODE_SKIP_PERMISSIONS', true);
 const OPENCODE_ALLOW_SUDO = envFlag('OPENCODE_ALLOW_SUDO', true);
@@ -575,6 +575,7 @@ function getBugWatcherPublicStatus() {
     autoMerge: BUG_WATCHER_AUTO_MERGE,
     autoMergeMs: BUG_WATCHER_AUTO_MERGE_MS,
     mergeBranch: BUG_WATCHER_MERGE_BRANCH,
+    maxAttempts: BUG_WATCHER_MAX_ATTEMPTS,
     skipPermissions: OPENCODE_SKIP_PERMISSIONS,
     sudo: OPENCODE_ALLOW_SUDO,
     treatWarningsAsErrors: BUG_WATCHER_TREAT_WARNINGS,
