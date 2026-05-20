@@ -41,6 +41,9 @@ const OPENCODE_AUTO_PR = envFlag('OPENCODE_AUTO_PR', true);
 const OPENCODE_AUTO_PUSH = envFlag('OPENCODE_AUTO_PUSH', true);
 const OPENCODE_CMD = process.env.OPENCODE_CMD || 'opencode';
 const OPENCODE_TIMEOUT_MS = Math.max(60000, parseInt(process.env.OPENCODE_TIMEOUT_MS || '1800000', 10) || 1800000);
+const BUG_WATCHER_AUTO_MERGE = envFlag('BUG_WATCHER_AUTO_MERGE', true);
+const BUG_WATCHER_AUTO_MERGE_MS = Math.max(60000, parseInt(process.env.BUG_WATCHER_AUTO_MERGE_MS || '300000', 10) || 300000);
+const BUG_WATCHER_MERGE_BRANCH = process.env.BUG_WATCHER_MERGE_BRANCH || 'main';
 
 let etaData = { regionsStarted: 0, firstRegionAt: null, lastRegionAt: null, wpTotal: 0, wpDone: 0, wpStart: null };
 let seenMcLogs = [];
@@ -48,8 +51,9 @@ let seenBmLogs = [];
 let seenVisitorLogs = [];
 let logBotStatuses = new Map();
 let HOST_PROJECT_DIR = process.env.HOST_PROJECT_DIR || '';
-let bugWatcherState = { queue: [], reports: [], current: null, lastCheckAt: '', lastCheckLog: '', baseBranch: '' };
+let bugWatcherState = { queue: [], reports: [], completed: [], current: null, lastCheckAt: '', lastCheckLog: '', baseBranch: '' };
 let bugWatcherRunning = false;
+let bugAutoMergeRunning = false;
 
 function getLocalIP() {
   const provided = process.env.HOST_IP;
@@ -343,12 +347,143 @@ function sessionStamp() {
 function normalizeBugState() {
   bugWatcherState.queue = Array.isArray(bugWatcherState.queue) ? bugWatcherState.queue : [];
   bugWatcherState.reports = Array.isArray(bugWatcherState.reports) ? bugWatcherState.reports : [];
-  if (bugWatcherState.current?.status === 'running') {
-    bugWatcherState.current.status = 'queued';
-    bugWatcherState.queue.unshift(bugWatcherState.current);
+  bugWatcherState.completed = Array.isArray(bugWatcherState.completed) ? bugWatcherState.completed : [];
+  if (bugWatcherState.current && ['completed', 'failed'].includes(bugWatcherState.current.status)) {
+    bugWatcherState.completed.push(bugWatcherState.current);
     bugWatcherState.current = null;
   }
+  if (bugWatcherState.current?.status === 'running') {
+    if ((bugWatcherState.current.attempts || 0) >= BUG_WATCHER_MAX_ATTEMPTS) {
+      bugWatcherState.current.status = 'failed';
+      bugWatcherState.current.summary = `Stopped during a site restart after ${bugWatcherState.current.attempts || 0} attempts.`;
+      bugWatcherState.current.updatedAt = nowIso();
+      bugWatcherState.completed.push(bugWatcherState.current);
+      updateReportsForTask(bugWatcherState.current, 'failed', { finishedAt: nowIso() });
+    } else {
+      bugWatcherState.current.status = 'retry';
+      bugWatcherState.queue.unshift(bugWatcherState.current);
+    }
+    bugWatcherState.current = null;
+  }
+  dedupeBugQueue();
+  const seenCompleted = new Set();
+  bugWatcherState.completed = bugWatcherState.completed.filter(task => {
+    if (!task?.id || seenCompleted.has(task.id)) return false;
+    seenCompleted.add(task.id);
+    return true;
+  });
+  bugWatcherState.completed = bugWatcherState.completed.slice(-100);
   bugWatcherState.current = bugWatcherState.current || null;
+}
+
+function relatedTaskKey(task) {
+  if (!task) return '';
+  return `${task.source || 'watcher'}:${safeSlug(task.title || task.signature || 'task')}`;
+}
+
+function dedupeBugQueue() {
+  const byKey = new Map();
+  const next = [];
+  for (const task of bugWatcherState.queue) {
+    if (!task || ['completed', 'failed'].includes(task.status)) continue;
+    const key = relatedTaskKey(task);
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, task);
+      next.push(task);
+      continue;
+    }
+    existing.details = `${existing.details || ''}\n\nRelated queued task ${task.id}:\n${task.details || ''}`.slice(-16000);
+    existing.reportIds = [...new Set([...(existing.reportIds || []), ...(task.reportIds || [])])];
+    existing.updatedAt = nowIso();
+    for (const reportId of task.reportIds || []) {
+      updateReport(reportId, { taskId: existing.id, branch: existing.branch, status: existing.status || 'queued' });
+      addReportComment(reportId, `Merged into related queued task ${existing.id} on branch ${existing.branch}.`, 'info');
+    }
+  }
+  bugWatcherState.queue = next;
+  mergeQueuedTasksIntoBatch();
+}
+
+function severityRank(severity) {
+  return { critical: 4, error: 3, warning: 2, feature: 1 }[String(severity || '').toLowerCase()] || 1;
+}
+
+function mergeQueuedTasksIntoBatch() {
+  const candidates = bugWatcherState.queue.filter(t => t && ['queued', 'retry'].includes(t.status) && t.source !== 'health-check');
+  if (candidates.length <= 1) return;
+  let batch = candidates.find(t => t.source === 'batch');
+  const now = nowIso();
+  if (!batch) {
+    const first = candidates[0];
+    batch = first;
+    batch.source = 'batch';
+    batch.title = `Batch: ${candidates.length} queued fixes`;
+    batch.signature = `batch:${Date.now()}:${hashText(candidates.map(t => t.id).join('|')).slice(0, 8)}`;
+    batch.branch = `autofix/batch-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${hashText(candidates.map(t => t.branch).join('|')).slice(0, 8)}`;
+    batch.status = 'queued';
+    batch.attempts = 0;
+  }
+  const merged = [batch, ...candidates.filter(t => t.id !== batch.id)];
+  batch.title = `Batch: ${merged.length} queued fixes`;
+  batch.severity = merged.reduce((max, t) => severityRank(t.severity) > severityRank(max) ? t.severity : max, batch.severity || 'feature');
+  batch.reportIds = [...new Set(merged.flatMap(t => t.reportIds || []))];
+  batch.details = merged.map(t => [
+    `Task ${t.id}: ${t.title}`,
+    `Severity: ${t.severity}`,
+    `Source: ${t.source}`,
+    `Original branch: ${t.branch}`,
+    '',
+    t.details || ''
+  ].join('\n')).join('\n\n---\n\n').slice(-24000);
+  batch.updatedAt = now;
+  for (const task of merged) {
+    for (const reportId of task.reportIds || []) {
+      updateReport(reportId, { taskId: batch.id, branch: batch.branch, status: 'queued' });
+      if (task.id !== batch.id) addReportComment(reportId, `Merged queued task ${task.id} into batch branch ${batch.branch} so multiple requests are processed together.`, 'info');
+    }
+  }
+  const mergedIds = new Set(merged.map(t => t.id));
+  bugWatcherState.queue = [batch, ...bugWatcherState.queue.filter(t => !mergedIds.has(t.id) && t.source === 'health-check')];
+}
+
+function findAnyTaskById(id) {
+  if (!id) return null;
+  if (bugWatcherState.current?.id === id) return bugWatcherState.current;
+  return bugWatcherState.queue.find(t => t.id === id) || bugWatcherState.completed.find(t => t.id === id) || null;
+}
+
+function taskElapsedMs(task) {
+  const start = Date.parse(task?.startedAt || task?.createdAt || '');
+  if (!start) return 0;
+  const end = Date.parse(task.finishedAt || task.mergedAt || (['completed', 'failed'].includes(task.status) ? task.updatedAt : '') || '') || Date.now();
+  return Math.max(0, end - start);
+}
+
+function averageTaskMs() {
+  const durations = bugWatcherState.completed
+    .map(taskElapsedMs)
+    .filter(ms => ms >= 30000 && ms <= OPENCODE_TIMEOUT_MS + 600000)
+    .sort((a, b) => a - b);
+  if (!durations.length) return Math.min(OPENCODE_TIMEOUT_MS, 15 * 60 * 1000);
+  return durations[Math.floor(durations.length / 2)];
+}
+
+function enrichTaskEstimate(task, queueIndex = -1, currentRemaining = 0, avgMs = averageTaskMs()) {
+  const elapsedMs = taskElapsedMs(task);
+  const estimate = { elapsedMs };
+  if (task.status === 'running') {
+    const remaining = Math.max(60000, avgMs - elapsedMs);
+    estimate.estimatedResolvedAt = new Date(Date.now() + remaining).toISOString();
+    estimate.estimatedSeconds = Math.round(remaining / 1000);
+  } else if (queueIndex >= 0) {
+    const startIn = currentRemaining + avgMs * queueIndex;
+    const resolvedIn = currentRemaining + avgMs * (queueIndex + 1);
+    estimate.estimatedStartAt = new Date(Date.now() + startIn).toISOString();
+    estimate.estimatedResolvedAt = new Date(Date.now() + resolvedIn).toISOString();
+    estimate.estimatedSeconds = Math.round(resolvedIn / 1000);
+  }
+  return estimate;
 }
 
 function saveBugWatcherState() {
@@ -363,7 +498,7 @@ function initBugWatcherState() {
   saveBugWatcherState();
 }
 
-function publicBugTask(task) {
+function publicBugTask(task, estimate = {}) {
   if (!task) return null;
   return {
     id: task.id,
@@ -378,13 +513,25 @@ function publicBugTask(task) {
     updatedAt: task.updatedAt,
     summary: task.summary || '',
     cause: task.cause || '',
+    mergeStatus: task.mergeStatus || '',
+    mergeAfter: task.mergeAfter || '',
+    mergedAt: task.mergedAt || '',
+    mergeTarget: task.mergeTarget || '',
+    mergeRejected: Boolean(task.mergeRejected),
+    startedAt: task.startedAt || '',
+    finishedAt: task.finishedAt || '',
+    elapsedMs: estimate.elapsedMs || taskElapsedMs(task),
+    estimatedStartAt: estimate.estimatedStartAt || '',
+    estimatedResolvedAt: estimate.estimatedResolvedAt || '',
+    estimatedSeconds: estimate.estimatedSeconds || 0,
     sessionLog: task.sessionLog ? path.relative(PROJECT_DIR, task.sessionLog) : '',
     details: String(task.details || '').slice(0, 1800)
   };
 }
 
-function publicBugReport(report) {
+function publicBugReport(report, task = findAnyTaskById(report?.taskId)) {
   if (!report) return null;
+  const estimate = task ? enrichTaskEstimate(task) : { elapsedMs: 0 };
   return {
     id: report.id,
     title: report.title,
@@ -400,6 +547,13 @@ function publicBugReport(report) {
     sessionLog: report.sessionLog || '',
     cause: report.cause || '',
     summary: report.summary || '',
+    mergeStatus: report.mergeStatus || '',
+    mergeAfter: report.mergeAfter || '',
+    mergedAt: report.mergedAt || '',
+    mergeRejected: Boolean(report.mergeRejected),
+    elapsedMs: estimate.elapsedMs || 0,
+    estimatedStartAt: estimate.estimatedStartAt || '',
+    estimatedResolvedAt: estimate.estimatedResolvedAt || '',
     comments: Array.isArray(report.comments) ? report.comments.slice(-10) : [],
     publicIpv4: report.publicIpv4 || '',
     observedIpv4: report.observedIpv4 || '',
@@ -409,19 +563,27 @@ function publicBugReport(report) {
 }
 
 function getBugWatcherPublicStatus() {
+  dedupeBugQueue();
+  const avgMs = averageTaskMs();
+  const currentEstimate = bugWatcherState.current ? enrichTaskEstimate(bugWatcherState.current, -1, 0, avgMs) : { estimatedSeconds: 0 };
+  const currentRemaining = bugWatcherState.current ? Math.max(60000, (currentEstimate.estimatedSeconds || 0) * 1000) : 0;
   return {
     enabled: BUG_WATCHER_ENABLED,
     autoFix: OPENCODE_AUTOFIX,
     autoPush: OPENCODE_AUTO_PUSH,
     autoPr: OPENCODE_AUTO_PR,
+    autoMerge: BUG_WATCHER_AUTO_MERGE,
+    autoMergeMs: BUG_WATCHER_AUTO_MERGE_MS,
+    mergeBranch: BUG_WATCHER_MERGE_BRANCH,
     skipPermissions: OPENCODE_SKIP_PERMISSIONS,
     sudo: OPENCODE_ALLOW_SUDO,
     treatWarningsAsErrors: BUG_WATCHER_TREAT_WARNINGS,
     intervalMs: BUG_WATCHER_INTERVAL_MS,
     running: bugWatcherRunning,
-    current: publicBugTask(bugWatcherState.current),
-    queue: bugWatcherState.queue.map(publicBugTask),
-    reports: bugWatcherState.reports.slice(-40).reverse().map(publicBugReport),
+    current: publicBugTask(bugWatcherState.current, currentEstimate),
+    queue: bugWatcherState.queue.map((task, i) => publicBugTask(task, enrichTaskEstimate(task, i, currentRemaining, avgMs))),
+    completed: bugWatcherState.completed.slice(-20).reverse().map(task => publicBugTask(task, enrichTaskEstimate(task, -1, 0, avgMs))),
+    reports: bugWatcherState.reports.slice(-40).reverse().map(report => publicBugReport(report)),
     lastCheckAt: bugWatcherState.lastCheckAt || '',
     lastCheckLog: bugWatcherState.lastCheckLog || ''
   };
@@ -430,7 +592,9 @@ function getBugWatcherPublicStatus() {
 function enqueueBugTask(input) {
   const title = String(input.title || 'Automated bug watcher task').trim().slice(0, 160);
   const details = String(input.details || '').trim();
-  const signature = input.signature || hashText(`${input.source || 'unknown'}\n${title}\n${details.replace(/\d{4}-\d{2}-\d{2}T[^\n]+/g, '<date>').slice(0, 4000)}`);
+  const signature = input.signature || (input.source === 'bug-report'
+    ? `report:${safeSlug(title)}`
+    : hashText(`${input.source || 'unknown'}\n${title}\n${details.replace(/\d{4}-\d{2}-\d{2}T[^\n]+/g, '<date>').slice(0, 4000)}`));
   const existing = [bugWatcherState.current, ...bugWatcherState.queue].filter(Boolean).find(t => t.signature === signature && !['completed', 'failed'].includes(t.status));
   if (existing) {
     existing.updatedAt = nowIso();
@@ -1045,11 +1209,99 @@ async function createOrUpdatePullRequest(task, worktree, baseBranch, logFile) {
   return prUrl;
 }
 
+function taskHasUserRejection(task) {
+  for (const reportId of task.reportIds || []) {
+    const report = bugWatcherState.reports.find(r => r.id === reportId);
+    if (!report) continue;
+    if (report.mergeRejected) return true;
+    if ((report.comments || []).some(c => c.kind === 'rejection')) return true;
+  }
+  return false;
+}
+
+function scheduleAutoMerge(task) {
+  if (!BUG_WATCHER_AUTO_MERGE || !task.branch) {
+    task.mergeStatus = 'manual';
+    return;
+  }
+  if (!task.mergeAfter) task.mergeAfter = new Date(Date.now() + BUG_WATCHER_AUTO_MERGE_MS).toISOString();
+  task.mergeStatus = taskHasUserRejection(task) ? 'blocked' : 'pending';
+  task.mergeTarget = BUG_WATCHER_MERGE_BRANCH;
+  updateReportsForTask(task, 'finished', { mergeStatus: task.mergeStatus, mergeAfter: task.mergeAfter, mergeTarget: task.mergeTarget });
+  const waitMin = Math.round(BUG_WATCHER_AUTO_MERGE_MS / 60000);
+  for (const reportId of task.reportIds || []) {
+    addReportComment(reportId, `Auto-merge is ${task.mergeStatus} for ${task.branch}. If not rejected within ${waitMin} minute${waitMin === 1 ? '' : 's'}, it will merge to ${BUG_WATCHER_MERGE_BRANCH} and push automatically.`, 'info');
+  }
+}
+
+function completeBugTask(task, status = 'completed') {
+  task.status = status;
+  task.updatedAt = nowIso();
+  if (status === 'completed') scheduleAutoMerge(task);
+  if (!bugWatcherState.completed.some(t => t.id === task.id)) bugWatcherState.completed.push(task);
+  bugWatcherState.completed = bugWatcherState.completed.slice(-100);
+  if (bugWatcherState.current?.id === task.id) bugWatcherState.current = null;
+  saveBugWatcherState();
+}
+
+async function processAutoMerges(ios) {
+  if (bugAutoMergeRunning || !BUG_WATCHER_AUTO_MERGE) return;
+  const task = bugWatcherState.completed.find(t => t.status === 'completed' && t.mergeStatus === 'pending' && t.mergeAfter && Date.parse(t.mergeAfter) <= Date.now());
+  if (!task) return;
+  bugAutoMergeRunning = true;
+  const logFile = path.join(bugSessionsDir, `${task.id}-merge-${sessionStamp()}.log`);
+  try {
+    if (taskHasUserRejection(task)) {
+      task.mergeStatus = 'blocked';
+      task.updatedAt = nowIso();
+      updateReportsForTask(task, 'finished', { mergeStatus: 'blocked' });
+      for (const reportId of task.reportIds || []) addReportComment(reportId, `Auto-merge blocked by user rejection for ${task.branch}.`, 'warn');
+      saveBugWatcherState();
+      return;
+    }
+    task.mergeStatus = 'merging';
+    task.updatedAt = nowIso();
+    updateReportsForTask(task, 'finished', { mergeStatus: 'merging' });
+    saveBugWatcherState();
+    elog(ios, `Auto-merging ${task.branch} to ${BUG_WATCHER_MERGE_BRANCH}`, 'info');
+    const mergeDir = path.join(bugWorktreesDir, `merge-${safeSlug(task.id)}`);
+    if (fs.existsSync(mergeDir)) fs.rmSync(mergeDir, { recursive: true, force: true });
+    await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} fetch origin ${shQuote(BUG_WATCHER_MERGE_BRANCH)} ${shQuote(task.branch)}`, { cwd: PROJECT_DIR, timeout: 300000, logFile });
+    await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} worktree add -B ${shQuote(BUG_WATCHER_MERGE_BRANCH)} ${shQuote(mergeDir)} ${shQuote(`origin/${BUG_WATCHER_MERGE_BRANCH}`)}`, { cwd: PROJECT_DIR, timeout: 180000, logFile });
+    let result = await runShellLogged(`git merge --no-ff ${shQuote(task.branch)} -m ${shQuote(`merge: ${task.title}`)}`, { cwd: mergeDir, timeout: 300000, logFile });
+    if (!result.ok) throw new Error((result.stderr || result.stdout || 'Merge failed').slice(-1200));
+    result = await runShellLogged(`git push origin ${shQuote(BUG_WATCHER_MERGE_BRANCH)}`, { cwd: mergeDir, timeout: 300000, logFile });
+    if (!result.ok) throw new Error((result.stderr || result.stdout || 'Push failed').slice(-1200));
+    await runShellLogged(`git push origin --delete ${shQuote(task.branch)}`, { cwd: mergeDir, timeout: 180000, logFile });
+    await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} worktree remove ${shQuote(mergeDir)} --force`, { cwd: PROJECT_DIR, timeout: 120000, logFile });
+    task.mergeStatus = 'merged';
+    task.mergedAt = nowIso();
+    task.updatedAt = nowIso();
+    task.mergeLog = path.relative(PROJECT_DIR, logFile);
+    updateReportsForTask(task, 'merged', { mergeStatus: 'merged', mergedAt: task.mergedAt });
+    for (const reportId of task.reportIds || []) addReportComment(reportId, `Auto-merged ${task.branch} into ${BUG_WATCHER_MERGE_BRANCH}, pushed, and deleted the remote fix branch.`, 'done');
+    saveBugWatcherState();
+    elog(ios, `Auto-merged ${task.branch}`, 'done');
+  } catch (err) {
+    task.mergeStatus = 'merge-failed';
+    task.summary = `${task.summary || ''} Auto-merge failed: ${err.message}`.trim();
+    task.updatedAt = nowIso();
+    task.mergeLog = path.relative(PROJECT_DIR, logFile);
+    updateReportsForTask(task, 'finished', { mergeStatus: 'merge-failed', summary: task.summary });
+    for (const reportId of task.reportIds || []) addReportComment(reportId, `Auto-merge failed for ${task.branch}: ${err.message}`, 'error');
+    saveBugWatcherState();
+    elog(ios, `Auto-merge failed: ${err.message}`, 'error');
+  } finally {
+    bugAutoMergeRunning = false;
+  }
+}
+
 async function rebuildSiteAfterFix(task, logFile) {
   const env = {
     ...process.env,
     HOST_PROJECT_DIR: HOST_PROJECT_DIR || PROJECT_DIR,
     COMPOSE_PROJECT_NAME: COMPOSE_PROJECT,
+    COMPOSE_IGNORE_ORPHANS: 'true',
     HOST_IP: LOCAL_IP
   };
   task.siteRestartStartedAt = nowIso();
@@ -1066,12 +1318,23 @@ async function rebuildSiteAfterFix(task, logFile) {
 
 async function processNextBugTask(ios) {
   if (bugWatcherRunning || !BUG_WATCHER_ENABLED || !OPENCODE_AUTOFIX) return;
+  dedupeBugQueue();
   const task = bugWatcherState.queue.find(t => t.status === 'queued' || t.status === 'retry');
   if (!task) return;
   bugWatcherRunning = true;
   bugWatcherState.queue = bugWatcherState.queue.filter(t => t.id !== task.id);
+  if ((task.attempts || 0) >= BUG_WATCHER_MAX_ATTEMPTS) {
+    task.status = 'failed';
+    task.summary = `Maximum attempts reached before another run (${task.attempts || 0}/${BUG_WATCHER_MAX_ATTEMPTS}).`;
+    task.finishedAt = nowIso();
+    updateReportsForTask(task, 'failed', { finishedAt: task.finishedAt });
+    completeBugTask(task, 'failed');
+    bugWatcherRunning = false;
+    return;
+  }
   task.status = 'running';
   task.attempts = (task.attempts || 0) + 1;
+  task.startedAt = task.startedAt || nowIso();
   task.updatedAt = nowIso();
   task.sessionLog = path.join(bugSessionsDir, `${task.id}-attempt-${task.attempts}-${sessionStamp()}.log`);
   bugWatcherState.current = task;
@@ -1084,9 +1347,10 @@ async function processNextBugTask(ios) {
       const recheck = await runBugChecks(PROJECT_DIR, task.sessionLog);
       const stillFailed = recheck.failed.find(check => check.name === checkName);
       if (!stillFailed) {
-        task.status = 'completed';
+        task.finishedAt = nowIso();
         task.summary = `No code repair needed. ${checkName || task.title} now passes with the current validation rules.`;
         task.cause = `A prior automated health check queued ${task.title}, but a fresh recheck passed before opencode ran.`;
+        completeBugTask(task, 'completed');
         elog(ios, `Bug watcher skipped stale task: ${task.title}`, 'done');
         return;
       }
@@ -1117,8 +1381,9 @@ async function processNextBugTask(ios) {
         if (OPENCODE_AUTO_PUSH) await runShellLogged(`git push -u origin ${shQuote(task.branch)}`, { cwd: worktree, logFile: task.sessionLog, timeout: 300000 });
         task.prUrl = await createOrUpdatePullRequest(task, worktree, baseBranch, task.sessionLog);
       }
-      task.status = 'completed';
-      updateReportsForTask(task, 'finished', { finishedAt: nowIso() });
+      task.finishedAt = nowIso();
+      updateReportsForTask(task, 'finished', { finishedAt: task.finishedAt });
+      completeBugTask(task, 'completed');
       await rebuildSiteAfterFix(task, task.sessionLog);
       elog(ios, `Bug watcher fixed: ${task.title}`, 'done');
     } else if (task.attempts < BUG_WATCHER_MAX_ATTEMPTS) {
@@ -1129,15 +1394,19 @@ async function processNextBugTask(ios) {
       elog(ios, `Bug watcher queued retry: ${task.title}`, 'warn');
     } else {
       task.status = 'failed';
+      task.finishedAt = nowIso();
       task.summary = `${task.summary} Maximum attempts reached.`;
-      updateReportsForTask(task, 'failed', { finishedAt: nowIso() });
+      updateReportsForTask(task, 'failed', { finishedAt: task.finishedAt });
+      completeBugTask(task, 'failed');
       elog(ios, `Bug watcher failed after ${task.attempts} attempts: ${task.title}`, 'error');
     }
   } catch (err) {
     task.status = task.attempts < BUG_WATCHER_MAX_ATTEMPTS ? 'retry' : 'failed';
     task.summary = `Watcher error: ${err.message}`;
-    updateReportsForTask(task, task.status === 'retry' ? 'processing' : 'failed', task.status === 'failed' ? { finishedAt: nowIso() } : {});
+    if (task.status === 'failed') task.finishedAt = nowIso();
+    updateReportsForTask(task, task.status === 'retry' ? 'processing' : 'failed', task.status === 'failed' ? { finishedAt: task.finishedAt } : {});
     if (task.status === 'retry') bugWatcherState.queue.push(task);
+    else completeBugTask(task, 'failed');
     elog(ios, `Bug watcher error: ${err.message}`, 'error');
     if (task.sessionLog) appendSession(task.sessionLog, `\n[watcher error] ${err.stack || err.message}\n`);
   } finally {
@@ -1555,6 +1824,42 @@ function mountRoutes(app, ios) {
       res.status(500).json({ ok: false, error: err.message });
     }
   });
+  app.delete('/api/bug-task/:id', (req, res) => {
+    try {
+      const task = bugWatcherState.queue.find(t => t.id === req.params.id);
+      if (!task) return res.status(404).json({ ok: false, error: 'Queued task not found or already running' });
+      bugWatcherState.queue = bugWatcherState.queue.filter(t => t.id !== task.id);
+      task.status = 'removed';
+      task.finishedAt = nowIso();
+      task.summary = 'Removed from queue by user request.';
+      completeBugTask(task, 'removed');
+      for (const reportId of task.reportIds || []) {
+        updateReport(reportId, { status: 'removed', summary: task.summary, finishedAt: task.finishedAt });
+        addReportComment(reportId, `Removed queued task ${task.id} from ${task.branch}.`, 'warn');
+      }
+      res.json({ ok: true, status: getBugWatcherPublicStatus() });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+  app.post('/api/bug-task/:id/reject-merge', async (req, res) => {
+    try {
+      const task = findAnyTaskById(req.params.id);
+      if (!task) return res.status(404).json({ ok: false, error: 'Task not found' });
+      const reason = String(req.body.reason || 'User rejected automatic merge').trim().slice(0, 1000);
+      task.mergeRejected = true;
+      task.mergeStatus = 'blocked';
+      task.updatedAt = nowIso();
+      for (const reportId of task.reportIds || []) {
+        updateReport(reportId, { mergeRejected: true, mergeStatus: 'blocked' });
+        addReportComment(reportId, { kind: 'rejection', message: `Auto-merge rejected: ${reason}`, publicIpv4: extractIpv4(req.body.publicIpv4) || await fetchServerPublicIpv4(), observedIpv4: requestIpv4(req) }, 'rejection');
+      }
+      saveBugWatcherState();
+      res.json({ ok: true, status: getBugWatcherPublicStatus() });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
   app.get('/api/states', (req, res) => res.json(readStates()));
   app.post('/api/states', (req, res) => {
     try {
@@ -1630,14 +1935,15 @@ async function main() {
   if (BUG_WATCHER_ENABLED) {
     installMissingDependencies().catch(err => console.error('[bug-watcher] dependency install failed:', err.message));
     setTimeout(async () => {
-      try { await queueBugCheckFailures(); await processNextBugTask(ios); }
+      try { await queueBugCheckFailures(); await processNextBugTask(ios); await processAutoMerges(ios); }
       catch (err) { console.error('[bug-watcher]', err.message); }
     }, 10000);
     setInterval(async () => {
-      try { await queueBugCheckFailures(); await processNextBugTask(ios); }
+      try { await queueBugCheckFailures(); await processNextBugTask(ios); await processAutoMerges(ios); }
       catch (err) { console.error('[bug-watcher]', err.message); }
     }, BUG_WATCHER_INTERVAL_MS);
     setInterval(() => { processNextBugTask(ios).catch(err => console.error('[bug-watcher]', err.message)); }, 10000);
+    setInterval(() => { processAutoMerges(ios).catch(err => console.error('[bug-watcher]', err.message)); }, 15000);
   }
 
   s1.server.listen(PORT, () => console.log(`Panel: http://0.0.0.0:${PORT} (IP: ${LOCAL_IP})`));

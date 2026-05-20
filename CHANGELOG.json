@@ -14,6 +14,10 @@
       "Bug watcher stores reports and sessions in logs/bug-watcher",
       "Reports are auto-approved, updated while processing, and finished with public comments, cause, summary, branch, session log, and PR URL",
       "Each unrelated error gets an autofix branch while related errors share a signature",
+      "Multiple queued requests can be batched into one branch for combined processing",
+      "Watcher panel shows task-in-progress, processing queue, pending merge, and merged fix lists with elapsed time and ETA",
+      "Queued tasks can be removed with a confirmation dialog",
+      "Completed fixes auto-merge to main after five minutes unless rejected",
       "Changelog modal shows dated entries colored by severity",
       "World zip import auto-detects classic and dimensions world roots"
     ],

@@ -431,6 +431,7 @@ let lastStatus=null;
 let busy=false;
 let stateCache={};
 let watcherTimer=null;
+let lastWatcherStatus=null;
 const TORONTO_TZ='America/Toronto';
 
 function act(cmd, force){if(busy&&!force)return; sio.emit('action',cmd)}
@@ -772,6 +773,22 @@ function exportLogs(tab){
 
 function severityClass(s){s=String(s||'feature').toLowerCase();return 'severity severity-'+(s==='critical'?'critical':s==='error'?'error':s==='warning'?'warning':s==='fix'?'fix':'feature')}
 function fmtDate(value){return value?new Date(value).toLocaleString('en-CA',{timeZone:TORONTO_TZ,hour12:false,timeZoneName:'short'}):'unknown'}
+function fmtMs(ms){
+  ms=Math.max(0,Number(ms)||0);
+  const sec=Math.round(ms/1000);
+  if(sec<60)return sec+'s';
+  const min=Math.floor(sec/60);
+  if(min<60)return min+'m '+(sec%60)+'s';
+  return Math.floor(min/60)+'h '+(min%60)+'m';
+}
+function taskMeta(t){
+  const parts=[];
+  parts.push('elapsed '+fmtMs(t.elapsedMs));
+  if(t.estimatedStartAt)parts.push('starts '+fmtDate(t.estimatedStartAt));
+  if(t.estimatedResolvedAt)parts.push('est. resolved '+fmtDate(t.estimatedResolvedAt));
+  if(t.mergeStatus)parts.push('merge '+t.mergeStatus+(t.mergeAfter?' after '+fmtDate(t.mergeAfter):''));
+  return parts.join(' - ');
+}
 
 function openBugModal(){
   $('bug-modal').classList.add('open');
@@ -801,16 +818,26 @@ async function getPublicIpv4(){
 }
 function renderWatcherStatus(data){
   if(!data){$('watcher-status').innerHTML='';return}
+  lastWatcherStatus=data;
+  const oldValues={};
+  document.querySelectorAll('#watcher-status input[id^="bug-comment-"]').forEach(inp=>{oldValues[inp.id]=inp.value});
+  const activeId=document.activeElement&&document.activeElement.id;
+  const activeSelection=activeId&&$(activeId)?[$(activeId).selectionStart,$(activeId).selectionEnd]:null;
   const cur=data.current;
-  const flags='<div class="card-sub">Auto fix '+(data.autoFix?'on':'off')+' - queued '+(data.queue||[]).length+' - warnings are '+(data.treatWarningsAsErrors?'small errors':'informational')+' - sudo '+(data.sudo?'allowed':'off')+'</div>';
-  const current=cur?'<div class="watcher-task"><span class="'+severityClass(cur.severity)+'">'+he(cur.severity)+'</span><div class="change-title">Running: '+he(cur.title)+'</div><div class="card-sub">Branch '+he(cur.branch)+' - attempt '+he(cur.attempts)+'</div></div>':'';
-  const queue=(data.queue||[]).slice(0,8).map(t=>'<div class="watcher-task"><span class="'+severityClass(t.severity)+'">'+he(t.severity)+'</span><div class="change-title">'+he(t.title)+'</div><div class="card-sub">'+he(t.status)+' - '+he(t.branch)+' - '+fmtDate(t.createdAt)+'</div></div>').join('')||'<div class="card-sub">Queue is empty.</div>';
+  const flags='<div class="card-sub">Auto fix '+(data.autoFix?'on':'off')+' - queued '+(data.queue||[]).length+' - warnings are '+(data.treatWarningsAsErrors?'small errors':'informational')+' - auto-merge '+(data.autoMerge?'on':'off')+' after '+fmtMs(data.autoMergeMs||0)+'</div>';
+  const taskCard=(t,actions)=>'<div class="watcher-task"><span class="'+severityClass(t.severity)+'">'+he(t.severity)+'</span><div class="change-title">'+he(t.title)+'</div><div class="card-sub">'+he(t.status)+' - '+he(t.branch)+' - attempt '+he(t.attempts||0)+'</div><div class="card-sub">'+he(taskMeta(t))+'</div>'+(t.summary?'<div class="card-sub">Summary: '+he(t.summary)+'</div>':'')+(actions||'')+'</div>';
+  const current=cur?taskCard(cur,''):'<div class="card-sub">No task is currently running.</div>';
+  const queue=(data.queue||[]).slice(0,12).map(t=>taskCard(t,'<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"><button class="btn btn-o btn-sm btn-danger" onclick="removeQueueTask(\''+he(t.id)+'\')">Remove</button></div>')).join('')||'<div class="card-sub">Queue is empty.</div>';
+  const pending=(data.completed||[]).filter(t=>t.mergeStatus&&t.mergeStatus!=='merged').slice(0,8).map(t=>taskCard(t,'<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"><button class="btn btn-o btn-sm btn-danger" onclick="rejectAutoMerge(\''+he(t.id)+'\')">Reject Auto-Merge</button></div>')).join('')||'<div class="card-sub">No fixes waiting for merge.</div>';
+  const merged=(data.completed||[]).filter(t=>t.mergeStatus==='merged').slice(0,8).map(t=>taskCard(t,'')).join('')||'<div class="card-sub">No merged fixes yet.</div>';
   const reports=(data.reports||[]).slice(0,5).map(r=>{
     const comments=(r.comments||[]).slice(-3).map(c=>'<div class="card-sub">Comment: '+he(c.message)+' <small>'+fmtDate(c.at)+'</small></div>').join('');
     const id=he(r.id);
     return '<div class="watcher-task"><span class="'+severityClass(r.severity)+'">'+he(r.severity)+'</span><div class="change-title">'+he(r.title)+'</div><div class="card-sub">'+fmtDate(r.createdAt)+' - '+he(r.status||'queued')+' - '+he(r.approval||'')+' - IPv4 '+he(r.publicIpv4||r.observedIpv4||'unknown')+'</div>'+comments+'<div class="cmd-box"><input class="cmd-input" id="bug-comment-'+id+'" placeholder="Add public feedback/comment"><button class="btn btn-t btn-sm" onclick="submitReportComment(\''+id+'\')">Comment</button></div></div>';
   }).join('');
-  $('watcher-status').innerHTML=flags+current+'<div class="change-title">Queue</div>'+queue+(reports?'<div class="change-title">Recent Reports</div>'+reports:'')+'<div class="card-sub">Last check: '+fmtDate(data.lastCheckAt)+' '+(data.lastCheckLog?' - '+he(data.lastCheckLog):'')+'</div>';
+  $('watcher-status').innerHTML=flags+'<div class="change-title">Task In Progress</div>'+current+'<div class="change-title">Processing Queue</div>'+queue+'<div class="change-title">Pending Merge / Finished Fixes</div>'+pending+'<div class="change-title">Merged Fixes</div>'+merged+(reports?'<div class="change-title">Recent Reports</div>'+reports:'')+'<div class="card-sub">Last check: '+fmtDate(data.lastCheckAt)+' '+(data.lastCheckLog?' - '+he(data.lastCheckLog):'')+'</div>';
+  Object.entries(oldValues).forEach(([id,value])=>{const el=$(id); if(el)el.value=value});
+  if(activeId&&$(activeId)){const el=$(activeId); el.focus(); if(activeSelection&&el.setSelectionRange)el.setSelectionRange(activeSelection[0],activeSelection[1])}
 }
 function refreshWatcher(){fetch('/api/bug-watcher').then(r=>r.json()).then(renderWatcherStatus).catch(e=>{$('watcher-status').innerHTML='<div class="card-sub">Watcher unavailable: '+he(e.message)+'</div>'})}
 async function ensureBugConsent(){
@@ -838,6 +865,28 @@ async function submitReportComment(id){
   fetch('/api/bug-report/'+encodeURIComponent(id)+'/comment',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,ipConsent:true,publicIpv4:await getPublicIpv4()})})
     .then(r=>r.json()).then(d=>{if(d.ok){$('bug-result').textContent='Comment added and checker updated.';renderWatcherStatus(d.status)}else $('bug-result').textContent='Comment failed: '+(d.error||'unknown')})
     .catch(e=>{$('bug-result').textContent='Comment failed: '+e.message});
+}
+function watcherTaskTitle(id){
+  const all=[...((lastWatcherStatus&&lastWatcherStatus.queue)||[]),...((lastWatcherStatus&&lastWatcherStatus.completed)||[]),lastWatcherStatus&&lastWatcherStatus.current].filter(Boolean);
+  const found=all.find(t=>t.id===id);
+  return found?found.title:id;
+}
+function removeQueueTask(id){
+  const title=watcherTaskTitle(id);
+  $('confirm-title').textContent='Remove Queue Task';
+  $('confirm-body').textContent='Remove "'+title+'" from the automated queue? This will not delete the report, only stop this queued fix.';
+  $('confirm-danger-icon').style.display='block';
+  confirmCb=()=>fetch('/api/bug-task/'+encodeURIComponent(id),{method:'DELETE'}).then(r=>r.json()).then(d=>{if(d.ok){$('bug-result').textContent='Removed queued task.';renderWatcherStatus(d.status)}else $('bug-result').textContent='Remove failed: '+(d.error||'unknown')}).catch(e=>{$('bug-result').textContent='Remove failed: '+e.message});
+  $('confirm-modal').classList.add('open');
+}
+async function rejectAutoMerge(id){
+  const title=watcherTaskTitle(id);
+  if(!await ensureBugConsent())return;
+  $('confirm-title').textContent='Reject Auto-Merge';
+  $('confirm-body').textContent='Reject automatic merge for "'+title+'"? The fix branch will stay available for more feedback.';
+  $('confirm-danger-icon').style.display='block';
+  confirmCb=()=>fetch('/api/bug-task/'+encodeURIComponent(id)+'/reject-merge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reason:'Rejected from public site',ipConsent:true})}).then(r=>r.json()).then(d=>{if(d.ok){$('bug-result').textContent='Auto-merge rejected.';renderWatcherStatus(d.status)}else $('bug-result').textContent='Reject failed: '+(d.error||'unknown')}).catch(e=>{$('bug-result').textContent='Reject failed: '+e.message});
+  $('confirm-modal').classList.add('open');
 }
 function runWatcherCheck(){
   $('bug-result').textContent='Running validation checks and queueing warnings/errors...';
