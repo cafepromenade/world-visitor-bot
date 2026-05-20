@@ -74,7 +74,12 @@ public partial class MainWindow : Window
                     case "RENDER_DISTANCE": txtRender.Text = v; break;
                     case "FLY_Y": txtFlyY.Text = v; break;
                     case "GRID_STEP": txtGridStep.Text = v; break;
+                    case "BOT_COUNT": txtBotCount.Text = v; break;
                     case "WORLD_PATH": txtWorldPath.Text = v; break;
+                    case "FOLLOW_PLAYER":
+                        txtFollowPlayer.Text = v;
+                        cbFollow.IsChecked = !string.IsNullOrWhiteSpace(v);
+                        break;
                 }
             }
         }
@@ -83,20 +88,48 @@ public partial class MainWindow : Window
 
     private void SaveSettings()
     {
-        File.WriteAllLines(Path.Combine(_projectRoot, ".env"), new[]
+        var envPath = Path.Combine(_projectRoot, ".env");
+        var values = ReadEnvValues(envPath);
+        values["MC_USERNAME"] = txtUsername.Text.Trim();
+        values["MC_PORT"] = txtPort.Text.Trim();
+        values["MC_AUTH"] = values.TryGetValue("MC_AUTH", out var auth) && !string.IsNullOrWhiteSpace(auth) ? auth : "offline";
+        values["RENDER_DISTANCE"] = txtRender.Text.Trim();
+        values["FLY_Y"] = txtFlyY.Text.Trim();
+        values["GRID_STEP"] = txtGridStep.Text.Trim();
+        values["BOT_COUNT"] = txtBotCount.Text.Trim();
+        values["WORLD_PATH"] = txtWorldPath.Text.Trim();
+        values["FOLLOW_PLAYER"] = cbFollow.IsChecked == true ? txtFollowPlayer.Text.Trim() : "";
+
+        var orderedKeys = new[]
         {
-            "# Overworld Visitor configuration",
-            $"MC_USERNAME={txtUsername.Text}",
-            $"MC_PORT={txtPort.Text}",
-            "MC_AUTH=offline",
-            $"RENDER_DISTANCE={txtRender.Text}",
-            $"FLY_Y={txtFlyY.Text}",
-            $"GRID_STEP={txtGridStep.Text}",
-            $"BOT_COUNT={txtBotCount.Text}",
-            $"WORLD_PATH={txtWorldPath.Text}",
-            $"FOLLOW_PLAYER={(cbFollow.IsChecked == true ? txtFollowPlayer.Text.Trim() : "")}",
-            ""
-        });
+            "MC_USERNAME", "MC_PORT", "MC_AUTH", "RENDER_DISTANCE", "FLY_Y",
+            "GRID_STEP", "BOT_COUNT", "WORLD_PATH", "FOLLOW_PLAYER"
+        };
+
+        var lines = new List<string> { "# Overworld Visitor configuration" };
+        lines.AddRange(orderedKeys.Select(key => $"{key}={values[key]}"));
+        var knownKeys = new HashSet<string>(orderedKeys, StringComparer.OrdinalIgnoreCase);
+        foreach (var key in values.Keys.Where(key => !knownKeys.Contains(key)).Order(StringComparer.OrdinalIgnoreCase))
+            lines.Add($"{key}={values[key]}");
+        lines.Add("");
+
+        File.WriteAllLines(envPath, lines);
+    }
+
+    private static Dictionary<string, string> ReadEnvValues(string envPath)
+    {
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (!File.Exists(envPath)) return values;
+
+        foreach (var line in File.ReadLines(envPath))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.Length == 0 || trimmed.StartsWith('#')) continue;
+            var p = trimmed.Split('=', 2);
+            if (p.Length == 2)
+                values[p[0].Trim()] = p[1].Trim();
+        }
+        return values;
     }
 
     public void ApplyCliOptions(CliOptions? opts)
@@ -176,7 +209,17 @@ public partial class MainWindow : Window
             "Still Running", MessageBoxButton.YesNo, MessageBoxImage.Warning);
         if (r == MessageBoxResult.No) { e.Cancel = true; return; }
         _monitorCts?.Cancel();
-        try { Process.Start("docker", "compose down")?.WaitForExit(5000); } catch { }
+        try
+        {
+            var proc = Process.Start(new ProcessStartInfo("docker", "compose down")
+            {
+                WorkingDirectory = _projectRoot,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            });
+            proc?.WaitForExit(5000);
+        }
+        catch { }
     }
 
     // ── Follow ──────────────────
@@ -184,6 +227,7 @@ public partial class MainWindow : Window
     {
         var followPath = Path.Combine(_projectRoot, "state", "follow_player.txt");
         var name = cbFollow.IsChecked == true ? txtFollowPlayer.Text.Trim() : "";
+        Directory.CreateDirectory(Path.GetDirectoryName(followPath)!);
         File.WriteAllText(followPath, name);
     }
 
@@ -239,8 +283,8 @@ public partial class MainWindow : Window
     {
         Log("Stopping...");
         _monitorCts?.Cancel();
-        await RunCmd("docker", "compose down");
-        await RunCmd("docker", "compose -f compose.new.yml down");
+        await RunCmd("docker", "compose down", throwOnError: false);
+        await RunCmd("docker", "compose -f compose.new.yml down", throwOnError: false);
         SetRunning(false);
         Log("All services stopped.");
     }
@@ -407,12 +451,14 @@ public partial class MainWindow : Window
     }
 
     // ── Helpers ─────────────────
-    private static async Task<string> RunCmd(string file, string args)
+    private async Task<string> RunCmd(string file, string args, bool throwOnError = true)
     {
         var psi = new ProcessStartInfo(file, args)
         {
             RedirectStandardOutput = true, RedirectStandardError = true,
-            UseShellExecute = false, CreateNoWindow = true
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WorkingDirectory = _projectRoot
         };
         using var proc = Process.Start(psi)!;
         var ot = proc.StandardOutput.ReadToEndAsync();
@@ -420,7 +466,10 @@ public partial class MainWindow : Window
         await proc.WaitForExitAsync();
         var o = (await ot).Trim();
         var e = (await et).Trim();
-        return o + (e.Length > 0 ? "\n" + e : "");
+        var output = o + (e.Length > 0 ? "\n" + e : "");
+        if (throwOnError && proc.ExitCode != 0)
+            throw new InvalidOperationException($"{file} {args} failed with exit code {proc.ExitCode}: {output}");
+        return output;
     }
 
     private int CountRegionFiles()
@@ -469,7 +518,6 @@ public partial class MainWindow : Window
             {
                 _monitorCts?.Cancel();
                 _monitorCts = null;
-                cbFollow.IsChecked = false;
                 lblServer.Content = "Server: not running";
                 lblServer.Foreground = new SolidColorBrush(Color.FromRgb(144, 144, 160));
                 UpdateProgress();

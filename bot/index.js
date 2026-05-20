@@ -6,23 +6,33 @@ const regions = require('./regions');
 const WORLD_DIR = process.env.WORLD_DIR || '/app/world';
 const STATE_DIR = process.env.STATE_DIR || '/app/state';
 
-const BOT_INDEX = parseInt(process.env.BOT_INDEX || '0');
-const BOT_COUNT = parseInt(process.env.BOT_COUNT || '1');
+function readInt(name, fallback, min = Number.MIN_SAFE_INTEGER) {
+  const value = Number.parseInt(process.env[name] || '', 10);
+  return Number.isFinite(value) && value >= min ? value : fallback;
+}
+
+const BOT_INDEX = readInt('BOT_INDEX', 0, 0);
+const BOT_COUNT = readInt('BOT_COUNT', 1, 1);
 const BOT_SUFFIX = BOT_COUNT > 1 ? `-bot${BOT_INDEX}` : '';
 const STATE_FILE = path.join(STATE_DIR, `visited${BOT_SUFFIX}.json`);
 
 const MC_HOST = process.env.MC_HOST || 'localhost';
-const MC_PORT = parseInt(process.env.MC_PORT || '25565');
+const MC_PORT = readInt('MC_PORT', 25565, 1);
 const MC_USERNAME = process.env.MC_USERNAME || 'Bot';
 const MC_USERNAME_FULL = BOT_COUNT > 1 ? `${MC_USERNAME}${BOT_INDEX}` : MC_USERNAME;
 const MC_AUTH = process.env.MC_AUTH || 'offline';
 const NEW_ONLY = process.env.NEW_ONLY === 'true';
-const FLY_Y = parseInt(process.env.FLY_Y || '200');
-const RENDER_DISTANCE = parseInt(process.env.RENDER_DISTANCE || '32');
-const GRID_STEP = parseInt(process.env.GRID_STEP || '80');
-const WP_DELAY = parseInt(process.env.WP_DELAY || '2000');
-const REGION_DELAY = parseInt(process.env.REGION_DELAY || '3000');
-const CHUNK_LOAD_TIMEOUT = parseInt(process.env.CHUNK_LOAD_TIMEOUT || '60000');
+const FLY_Y = readInt('FLY_Y', 200);
+const RENDER_DISTANCE = readInt('RENDER_DISTANCE', 32, 2);
+const GRID_STEP = readInt('GRID_STEP', 80, 1);
+const WP_DELAY = readInt('WP_DELAY', 2000, 0);
+const REGION_DELAY = readInt('REGION_DELAY', 3000, 0);
+const CHUNK_LOAD_TIMEOUT = readInt('CHUNK_LOAD_TIMEOUT', 60000, 1000);
+const CHUNK_CHECK_RADIUS = readInt('CHUNK_CHECK_RADIUS', 1, 0);
+const MOVE_MODE = (process.env.MOVE_MODE || 'smooth').toLowerCase();
+const MOVE_STEP = readInt('MOVE_STEP', 32, 1);
+const MOVE_DELAY = readInt('MOVE_DELAY', 150, 0);
+const MOVE_REACH_DISTANCE = readInt('MOVE_REACH_DISTANCE', 8, 1);
 const SHUTDOWN_ON_COMPLETE = process.env.SHUTDOWN_ON_COMPLETE === 'true';
 const FOLLOW_PLAYER = process.env.FOLLOW_PLAYER || '';
 
@@ -32,6 +42,7 @@ let idx = 0;
 let bot;
 let activeConnection = 0;
 let reconnectAttempts = 0;
+let shuttingDown = false;
 
 function log(msg) {
   console.log(`[${new Date().toISOString()}] ${msg}`);
@@ -39,10 +50,19 @@ function log(msg) {
 
 function chat(msg) {
   if (!bot || !bot.entity) return;
-  try { bot.chat(msg); } catch {}
+  try {
+    bot.chat(msg);
+  } catch (err) {
+    log(`WARN: failed to send command "${msg}": ${err.message}`);
+  }
 }
 
 function init() {
+  if (BOT_INDEX >= BOT_COUNT) {
+    log(`Invalid bot assignment: BOT_INDEX=${BOT_INDEX} must be less than BOT_COUNT=${BOT_COUNT}`);
+    process.exit(1);
+  }
+
   let allRegions = regions.getAllRegions(WORLD_DIR);
   allRegions = allRegions.filter((_, i) => i % BOT_COUNT === BOT_INDEX);
   log(`Found ${allRegions.length} regions assigned to bot ${BOT_INDEX}/${BOT_COUNT}`);
@@ -61,9 +81,34 @@ function init() {
   log(`Will visit ${todo.length} regions (NEW_ONLY=${NEW_ONLY})`);
   log(`Server: ${MC_HOST}:${MC_PORT}  Username: ${MC_USERNAME_FULL}  Auth: ${MC_AUTH}`);
   log(`Render distance: ${RENDER_DISTANCE}  Flight Y: ${FLY_Y}  Grid step: ${GRID_STEP} blocks`);
+  log(`Chunk check radius: ${CHUNK_CHECK_RADIUS}  Chunk load timeout: ${CHUNK_LOAD_TIMEOUT}ms`);
+  log(`Movement mode: ${MOVE_MODE}  Step: ${MOVE_STEP} blocks  Delay: ${MOVE_DELAY}ms`);
 
   connect();
 }
+
+function visitedCount() {
+  return Object.keys(state?.visited || {}).length;
+}
+
+function saveProgress(reason) {
+  if (!state) return;
+  regions.saveState(STATE_FILE, state);
+  const suffix = reason ? ` (${reason})` : '';
+  log(`Progress saved: ${visitedCount()}/${todo.length}${suffix}`);
+}
+
+function shutdown(reason) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  log(`Received ${reason}. Saving progress and disconnecting...`);
+  saveProgress('shutdown');
+  try { bot?.end(); } catch {}
+  setTimeout(() => process.exit(0), 1000);
+}
+
+process.once('SIGINT', () => shutdown('SIGINT'));
+process.once('SIGTERM', () => shutdown('SIGTERM'));
 
 function connect() {
   const myConn = ++activeConnection;
@@ -124,6 +169,10 @@ function onError(err) {
 
 function onEnd() {
   log('Connection ended');
+  if (shuttingDown) {
+    process.exit(0);
+    return;
+  }
   if (idx < todo.length && reconnectAttempts < 10) {
     reconnectAttempts++;
     log(`Reconnecting in 10s... (attempt ${reconnectAttempts}/10)`);
@@ -163,9 +212,69 @@ function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function getFollowPlayer() {
+  const followFile = path.join(STATE_DIR, 'follow_player.txt');
+  try {
+    const value = fs.readFileSync(followFile, 'utf8').trim();
+    if (value) return value;
+  } catch {}
+  return FOLLOW_PLAYER;
+}
+
+function tpCommand(name, x, y, z) {
+  chat(`/tp ${name} ${Math.round(x)} ${Math.round(y)} ${Math.round(z)}`);
+}
+
+async function waitForPosition(target, timeout = 5000) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    if (!bot.entity) return false;
+    const pos = bot.entity.position;
+    const distance = Math.hypot(pos.x - target.x, pos.y - target.y, pos.z - target.z);
+    if (distance <= MOVE_REACH_DISTANCE) return true;
+    await delay(100);
+  }
+  return false;
+}
+
+async function moveToWaypoint(connId, target) {
+  if (connId !== activeConnection || !bot.entity) return;
+
+  const followPlayer = getFollowPlayer();
+  const startPos = bot.entity.position;
+  const start = { x: startPos.x, y: startPos.y, z: startPos.z };
+  const dx = target.x - start.x;
+  const dy = target.y - start.y;
+  const dz = target.z - start.z;
+  const distance = Math.hypot(dx, dy, dz);
+  const steps = MOVE_MODE === 'teleport' ? 1 : Math.max(1, Math.ceil(distance / MOVE_STEP));
+
+  for (let step = 1; step <= steps; step++) {
+    if (connId !== activeConnection) return;
+    const t = step / steps;
+    const x = start.x + dx * t;
+    const y = start.y + dy * t;
+    const z = start.z + dz * t;
+    if (followPlayer) tpCommand(followPlayer, x, y + 5, z);
+    tpCommand(MC_USERNAME_FULL, x, y, z);
+    if (step < steps || MOVE_DELAY > 0) {
+      await delay(MOVE_DELAY);
+    }
+  }
+
+  const arrived = await waitForPosition(target);
+  if (!arrived && bot.entity) {
+    const pos = bot.entity.position;
+    log(`WARN: movement target not reached. Target=(${target.x}, ${target.y}, ${target.z}) Position=(${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)})`);
+  }
+}
+
 async function waitForChunksLoaded(connId) {
   const start = Date.now();
-  const step = Math.max(4, Math.floor(RENDER_DISTANCE / 4));
+  const radius = Math.min(CHUNK_CHECK_RADIUS, RENDER_DISTANCE);
+  const step = radius <= 2 ? 1 : Math.max(1, Math.floor(radius / 2));
+  let lastMissing = 0;
+  let lastTotal = 0;
 
   while (Date.now() - start < CHUNK_LOAD_TIMEOUT) {
     if (connId !== activeConnection) return;
@@ -176,19 +285,25 @@ async function waitForChunksLoaded(connId) {
     const cz = Math.floor(pos.z / 16);
 
     let allLoaded = true;
-    for (let dx = -RENDER_DISTANCE; dx <= RENDER_DISTANCE && allLoaded; dx += step) {
-      for (let dz = -RENDER_DISTANCE; dz <= RENDER_DISTANCE && allLoaded; dz += step) {
+    let missing = 0;
+    let total = 0;
+    for (let dx = -radius; dx <= radius; dx += step) {
+      for (let dz = -radius; dz <= radius; dz += step) {
+        total++;
         if (!bot.world.getColumn(cx + dx, cz + dz)) {
           allLoaded = false;
+          missing++;
         }
       }
     }
+    lastMissing = missing;
+    lastTotal = total;
 
     if (allLoaded) return;
     await delay(500);
   }
 
-  log('WARN: Chunks not fully loaded after timeout');
+  log(`WARN: Chunks not fully loaded after timeout (${lastMissing}/${lastTotal} sample columns missing, radius ${radius})`);
 }
 
 async function flyRegion(connId, target, index) {
@@ -203,15 +318,7 @@ async function flyRegion(connId, target, index) {
     if (connId !== activeConnection) return;
     const wp = waypoints[i];
 
-    const followFile = path.join(STATE_DIR, 'follow_player.txt');
-    let followPlayer = FOLLOW_PLAYER;
-    try { const f = fs.readFileSync(followFile, 'utf8').trim(); if (f) followPlayer = f; } catch {}
-    if (followPlayer) {
-      chat(`/tp ${followPlayer} ${wp.x} ${wp.y + 5} ${wp.z}`);
-    }
-
-    chat(`/tp ${MC_USERNAME_FULL} ${wp.x} ${wp.y} ${wp.z}`);
-    await delay(500);
+    await moveToWaypoint(connId, wp);
 
     await waitForChunksLoaded(connId);
     if (connId !== activeConnection) return;
@@ -259,7 +366,7 @@ async function processNext(connId) {
   }
 
   try {
-    chat(`/tp ${MC_USERNAME_FULL} ${target.cx} ${FLY_Y} ${target.cz}`);
+    await moveToWaypoint(connId, { x: target.cx, y: FLY_Y, z: target.cz });
     await delay(REGION_DELAY);
     if (connId !== activeConnection) return;
 
@@ -268,10 +375,7 @@ async function processNext(connId) {
 
     regions.markVisited(state, target.rx, target.rz);
 
-    if (current % 20 === 0 || current === todo.length) {
-      regions.saveState(STATE_FILE, state);
-      log(`Progress saved: ${current}/${todo.length}`);
-    }
+    saveProgress('region complete');
   } catch (err) {
     log(`Error in region (${target.rx},${target.rz}): ${err.message}`);
     try { chat(`Error: ${err.message}`); } catch {}

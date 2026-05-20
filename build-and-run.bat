@@ -20,8 +20,8 @@ echo [OK] Administrator
 echo Checking .NET SDK...
 dotnet --version >nul 2>&1
 if %errorlevel% neq 0 (
-    echo Installing .NET SDK 9.0...
-    winget install Microsoft.DotNet.SDK.9 --silent --accept-source-agreements --accept-package-agreements
+    echo Installing .NET SDK 10.0...
+    winget install Microsoft.DotNet.SDK.10 --silent --accept-source-agreements --accept-package-agreements
     echo [DONE] .NET SDK installed. Restart this script after install.
     pause
     exit /b

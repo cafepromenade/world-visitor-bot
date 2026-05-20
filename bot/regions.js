@@ -26,7 +26,8 @@ function getAllRegions(worldDir) {
       const center = regionCenter(parsed.rx, parsed.rz);
       return { rx: parsed.rx, rz: parsed.rz, cx: center.x, cz: center.z, file: f };
     })
-    .filter(Boolean);
+    .filter(Boolean)
+    .sort((a, b) => a.rz - b.rz || a.rx - b.rx);
 }
 
 function regionKey(rx, rz) {
@@ -55,7 +56,7 @@ function getGitDiffRegions(worldDir, oldCommit, newCommit) {
     const relativeRegion = path.relative(repoRoot, regionDir).replace(/\\/g, '/');
     const out = execSync(
       `git --git-dir="${gitDir}" --work-tree="${repoRoot}" diff --name-only --diff-filter=AM ${oldCommit} ${newCommit} -- ${relativeRegion}/`,
-      { encoding: 'utf8' }
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }
     ).trim();
     if (!out) return [];
     return out.split('\n')
@@ -75,7 +76,10 @@ function getGitDiffRegions(worldDir, oldCommit, newCommit) {
 function getCurrentCommit(repoRoot) {
   try {
     const gitDir = path.join(repoRoot, '.git');
-    return execSync(`git --git-dir="${gitDir}" rev-parse HEAD`, { encoding: 'utf8' }).trim();
+    return execSync(`git --git-dir="${gitDir}" rev-parse HEAD`, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe']
+    }).trim();
   } catch (_) {
     return null;
   }

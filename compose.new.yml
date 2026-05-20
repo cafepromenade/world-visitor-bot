@@ -9,8 +9,8 @@ services:
       TYPE: "PAPER"
       VERSION: "26.1.2"
       ONLINE_MODE: "FALSE"
-      VIEW_DISTANCE: "28"
-      OPS: "${MC_USERNAME:-Bot}"
+      VIEW_DISTANCE: "${RENDER_DISTANCE:-28}"
+      OPS: "${MC_USERNAME:-Bot},${FOLLOW_PLAYER:-}"
       MOTD: "Overworld Chunk Visitor - New Only"
       DIFFICULTY: "peaceful"
       MODE: "creative"
@@ -44,12 +44,19 @@ services:
       - MC_USERNAME=${MC_USERNAME:-Bot}
       - MC_AUTH=offline
       - NEW_ONLY=true
-      - RENDER_DISTANCE=28
-      - FLY_Y=200
-      - GRID_STEP=80
-      - WP_DELAY=2000
-      - REGION_DELAY=3000
+      - RENDER_DISTANCE=${RENDER_DISTANCE:-28}
+      - FLY_Y=${FLY_Y:-200}
+      - GRID_STEP=${GRID_STEP:-80}
+      - WP_DELAY=${WP_DELAY:-2000}
+      - REGION_DELAY=${REGION_DELAY:-3000}
       - CHUNK_LOAD_TIMEOUT=${CHUNK_LOAD_TIMEOUT:-30000}
+      - CHUNK_CHECK_RADIUS=${CHUNK_CHECK_RADIUS:-1}
+      - MOVE_MODE=${MOVE_MODE:-smooth}
+      - MOVE_STEP=${MOVE_STEP:-32}
+      - MOVE_DELAY=${MOVE_DELAY:-150}
+      - FOLLOW_PLAYER=${FOLLOW_PLAYER:-}
+      - BOT_COUNT=${BOT_COUNT:-1}
+      - BOT_INDEX=0
       - SHUTDOWN_ON_COMPLETE=true
     volumes:
       - '${WORLD_PATH:-./mc-data-new/world}:/repo/world:ro'

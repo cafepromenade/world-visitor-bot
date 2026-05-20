@@ -9,7 +9,7 @@ cd "$(dirname "$0")"
 # Check .NET
 if ! command -v dotnet &>/dev/null; then
     echo "Installing .NET SDK..."
-    curl -sSL https://dot.net/v1/dotnet-install.sh | bash /dev/stdin --channel 9.0
+    curl -sSL https://dot.net/v1/dotnet-install.sh | bash /dev/stdin --channel 10.0
     export PATH="$HOME/.dotnet:$PATH"
 fi
 echo "[OK] .NET SDK $(dotnet --version)"

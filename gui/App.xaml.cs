@@ -6,7 +6,6 @@ public partial class App : Application
 {
     protected override void OnStartup(StartupEventArgs e)
     {
-        base.OnStartup(e);
         var args = Environment.GetCommandLineArgs().Skip(1).ToArray();
         var opts = Cli.ParseArgs(args);
 
@@ -31,9 +30,9 @@ public partial class App : Application
             return;
         }
 
-        if (MainWindow is MainWindow mw)
-        {
-            mw.ApplyCliOptions(opts);
-        }
+        base.OnStartup(e);
+        var window = new MainWindow(opts);
+        MainWindow = window;
+        window.Show();
     }
 }

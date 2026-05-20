@@ -4,12 +4,16 @@ Thumbs.db
 *.heapsnapshot
 session-*.md
 cache/
+debug-runs/
+node_modules/
 /web
 /data
 # GUI build output
 gui/bin/
 gui/obj/
 .env
+/state/*
+!/state/.gitkeep
 /mc-data/*
 !/mc-data/.gitkeep
 /mc-data-new/*

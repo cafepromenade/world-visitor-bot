@@ -4,6 +4,9 @@
   "private": true,
   "description": "Mineflayer bot that visits all regions in a Minecraft world",
   "main": "index.js",
+  "scripts": {
+    "test": "node --test"
+  },
   "dependencies": {
     "mineflayer": "^4.37.1"
   }
