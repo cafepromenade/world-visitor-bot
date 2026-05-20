@@ -10,5 +10,6 @@ services:
       - .:/app/project
     environment:
       - PROJECT_HOST_DIR=${PWD:-/home/docker/world-visitor-bot}
+      - DOMAIN=${DOMAIN:-bigheados.com}
       - PORT=80
       - PORT2=3000

@@ -2,143 +2,322 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
 <title>World Visitor Bot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background:#0b1120;color:#e2e8f0;min-height:100vh}
-.container{max-width:760px;margin:0 auto;padding:12px}
-header{text-align:center;padding:20px 0 8px}
-header h1{font-size:1.4rem;font-weight:700;letter-spacing:-0.02em}
-header p{font-size:0.75rem;color:#64748b;margin-top:2px}
-.toolbar{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin:10px 0 14px}
-.btn{padding:7px 16px;border:none;border-radius:10px;font-size:0.78rem;font-weight:600;cursor:pointer;transition:all .12s;display:inline-flex;align-items:center;gap:5px}
-.btn:active{transform:scale(.95)}
-.btn-go{background:#22c55e;color:#fff}
-.btn-stop{background:#ef4444;color:#fff}
-.btn-warn{background:#ea580c;color:#fff}
-.btn-gray{background:#334155;color:#cbd5e1}
-.btn-blue{background:#1d4ed8;color:#fff}
-.btn:disabled{opacity:.35;pointer-events:none}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:0 0 12px}
-.card{background:#111827;border-radius:14px;padding:14px;border:1px solid #1e293b}
-.card-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
-.dot{width:9px;height:9px;border-radius:9999px;flex-shrink:0}
-.dot.running{background:#22c55e;box-shadow:0 0 10px #22c55e55}
-.dot.stopped{background:#ef4444;box-shadow:0 0 6px #ef444444}
-.dot.starting{background:#eab308;box-shadow:0 0 10px #eab30855;animation:pulse 1.2s infinite}
-.dot.unknown{background:#475569}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
-.card-title{font-size:.85rem;font-weight:600}
-.card-sub{font-size:.68rem;color:#64748b;text-transform:uppercase}
-.card-actions{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
-.card-actions .btn{padding:5px 12px;font-size:.7rem}
-.progress{background:#111827;border-radius:14px;padding:14px;border:1px solid #1e293b;margin-bottom:12px}
-.progress h2{font-size:.88rem;font-weight:600;color:#94a3b8;margin-bottom:10px}
-.bar{height:24px;background:#1e293b;border-radius:12px;overflow:hidden;margin-bottom:8px}
-.bar-fill{height:100%;background:linear-gradient(90deg,#2563eb,#7c3aed);border-radius:12px;transition:width .5s ease;min-width:0;display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:700;color:#fff}
-.info-row{display:flex;justify-content:space-between;font-size:.7rem;color:#64748b}
-.info-detail{font-size:.68rem;color:#475569;margin-top:4px}
-.logs{background:#0f172a;border-radius:14px;padding:14px;border:1px solid #1e293b}
-.logs h2{font-size:.88rem;font-weight:600;color:#94a3b8;margin-bottom:10px}
-.log-box{background:#020617;border-radius:10px;padding:10px;font-family:'SF Mono','Fira Code','Cascadia Code',monospace;font-size:.68rem;line-height:1.55;color:#94a3b8;max-height:300px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
-.log-box .t{color:#eab308}
-.log-box .w{color:#facc15}
-.log-box .e{color:#ef4444}
-.log-box .i{color:#3b82f6}
-.log-box .d{color:#22c55e}
-@media(max-width:480px){
-  .container{padding:8px}
-  .cards{grid-template-columns:1fr}
-  header h1{font-size:1.2rem}
+:root{
+  --bg:#0d1117; --surface:#161b22; --card:#1c2333; --border:#30363d;
+  --primary:#58a6ff; --primary-dim:#388bfd33; --green:#3fb950; --red:#f85149;
+  --yellow:#d2991d; --text:#e6edf3; --text2:#8b949e; --text3:#6e7681;
+  --radius:12px; --radius-sm:8px; --shadow:0 1px 3px rgba(0,0,0,.3);
+  --transition:0.2s cubic-bezier(.4,0,.2,1);
 }
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{font-size:16px}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
+.app{max-width:960px;margin:0 auto;padding:0 16px 32px}
+
+/* Top bar */
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:16px 0 12px;gap:12px;flex-wrap:wrap}
+.topbar h1{font-size:1.25rem;font-weight:700;letter-spacing:-0.02em}
+.topbar-actions{display:flex;gap:8px;flex-wrap:wrap}
+
+/* Buttons */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border:none;border-radius:var(--radius-sm);font:600 0.8rem/1 'Inter',sans-serif;cursor:pointer;transition:var(--transition);text-decoration:none;position:relative;overflow:hidden}
+.btn:active{transform:scale(.96)}
+.btn-p{background:var(--primary);color:#fff}
+.btn-p:hover{filter:brightness(1.1)}
+.btn-g{background:var(--green);color:#000}
+.btn-g:hover{filter:brightness(1.1)}
+.btn-r{background:var(--red);color:#fff}
+.btn-r:hover{filter:brightness(1.1)}
+.btn-y{background:var(--yellow);color:#000}
+.btn-y:hover{filter:brightness(1.1)}
+.btn-o{background:var(--card);color:var(--text);border:1px solid var(--border)}
+.btn-o:hover{background:#243047}
+.btn-sm{padding:5px 10px;font-size:.7rem}
+
+/* Grid */
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin:12px 0}
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:12px 0}
+
+/* Cards */
+.card{background:var(--card);border-radius:var(--radius);padding:16px;border:1px solid var(--border);transition:var(--transition)}
+.card:hover{border-color:var(--primary-dim)}
+.card-header{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.card-title{font-size:.9rem;font-weight:600}
+.card-sub{font-size:.72rem;color:var(--text2)}
+.card-body{font-size:.8rem;color:var(--text)}
+
+/* Status dot */
+.dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;transition:var(--transition)}
+.dot.running{background:var(--green);box-shadow:0 0 8px var(--green)}
+.dot.stopped{background:var(--red);box-shadow:0 0 6px var(--red)}
+.dot.starting{background:var(--yellow);box-shadow:0 0 10px var(--yellow);animation:pulse 1.2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+
+/* Progress */
+.progress-card{padding:20px}
+.progress-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.progress-header h2{font-size:.9rem;font-weight:600;color:var(--text2)}
+.progress-header span{font-size:.8rem;font-weight:700;color:var(--primary)}
+.bar{height:28px;background:#0d1117;border-radius:14px;overflow:hidden;margin-bottom:8px}
+.bar-fill{height:100%;background:linear-gradient(90deg,var(--primary),#a371f7);border-radius:14px;transition:width .6s var(--transition);min-width:0;display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:700;color:#fff}
+.progress-meta{display:flex;justify-content:space-between;font-size:.7rem;color:var(--text3)}
+
+/* Stats */
+.stat-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)}
+.stat-row:last-child{border-bottom:none}
+.stat-label{font-size:.75rem;color:var(--text2)}
+.stat-val{font-size:.75rem;font-weight:600;font-family:'JetBrains Mono',monospace}
+
+/* Logs */
+.log-box{background:#0d1117;border-radius:var(--radius-sm);padding:12px;font:400 .72rem/1.6 'JetBrains Mono',monospace;color:var(--text3);max-height:240px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;border:1px solid var(--border)}
+.log-box .t{color:var(--yellow)}
+.log-box .w{color:var(--yellow)}
+.log-box .e{color:var(--red)}
+.log-box .i{color:var(--primary)}
+.log-box .d{color:var(--green)}
+.log-box .m{color:var(--text3)}
+.section-label{font-size:.78rem;font-weight:600;color:var(--text2);margin:12px 0 6px;display:flex;align-items:center;gap:6px}
+
+/* Modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:100;opacity:0;pointer-events:none;transition:opacity .2s}
+.modal-overlay.open{opacity:1;pointer-events:auto}
+.modal{background:var(--card);border-radius:16px;padding:24px;width:90%;max-width:440px;max-height:85vh;overflow-y:auto;border:1px solid var(--border);transform:scale(.9) translateY(20px);transition:transform .25s var(--transition)}
+.modal-overlay.open .modal{transform:scale(1) translateY(0)}
+.modal h2{font-size:1.1rem;font-weight:700;margin-bottom:4px}
+.modal p{font-size:.8rem;color:var(--text2);margin-bottom:16px}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+
+/* Form */
+.form-group{margin-bottom:12px}
+.form-label{display:block;font-size:.75rem;font-weight:600;color:var(--text2);margin-bottom:4px}
+.form-input{width:100%;padding:8px 12px;background:#0d1117;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font:400 .82rem 'Inter',sans-serif;transition:var(--transition)}
+.form-input:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 2px var(--primary-dim)}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+@media(max-width:480px){
+  .topbar{flex-direction:column;align-items:flex-start}
+  .grid2{grid-template-columns:1fr}
+  .grid3{grid-template-columns:1fr}
+  .form-row{grid-template-columns:1fr}
+}
+
+/* Animations */
+@keyframes slideUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+.anim-in{animation:slideUp .35s var(--transition) forwards}
+
+/* Tabs */
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:12px}
+.tab{padding:8px 16px;font-size:.78rem;font-weight:600;color:var(--text2);background:none;border:none;cursor:pointer;border-bottom:2px solid transparent;transition:var(--transition)}
+.tab.active{color:var(--primary);border-bottom-color:var(--primary)}
 </style>
 </head>
 <body>
-<div class="container">
-<header>
-  <h1>&#127760; World Visitor Bot</h1>
-  <p id="clock"></p>
-</header>
+<div class="app">
+  <!-- Confirm modal -->
+  <div class="modal-overlay" id="confirm-modal">
+    <div class="modal">
+      <h2 id="confirm-title">Confirm</h2>
+      <p id="confirm-body">Are you sure?</p>
+      <div class="modal-actions">
+        <button class="btn btn-o" onclick="closeConfirm()">Cancel</button>
+        <button class="btn btn-r" id="confirm-ok">Confirm</button>
+      </div>
+    </div>
+  </div>
 
-<div class="toolbar">
-  <button class="btn btn-go" onclick="act('start-all')">&#9654; Start All</button>
-  <button class="btn btn-stop" onclick="act('stop-all')">&#9632; Stop All</button>
-  <button class="btn btn-blue" onclick="act('start-visitor')">&#9654; Bot</button>
-  <button class="btn btn-stop" onclick="act('stop-visitor')">&#9632; Bot</button>
-  <button class="btn btn-blue" onclick="act('start-bluemap')">&#9654; Map</button>
-  <button class="btn btn-stop" onclick="act('stop-bluemap')">&#9632; Map</button>
-  <button class="btn btn-warn" onclick="act('prune')">&#8635; Prune</button>
-  <a class="btn btn-gray" href="http://localhost:8100" target="_blank" rel="noopener" style="text-decoration:none">&#128506; BlueMap</a>
-</div>
+  <!-- Wizard modal -->
+  <div class="modal-overlay" id="wizard-modal">
+    <div class="modal">
+      <h2>&#9881; Bot Setup</h2>
+      <p>Configure before launching the bot</p>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">MC Host</label><input class="form-input" id="w-MC_HOST" value="mc"></div>
+        <div class="form-group"><label class="form-label">MC Port</label><input class="form-input" id="w-MC_PORT" value="25565" type="number"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Username</label><input class="form-input" id="w-MC_USERNAME" value="Bot"></div>
+        <div class="form-group"><label class="form-label">Bot Count</label><input class="form-input" id="w-BOT_COUNT" value="1" type="number" min="1" max="4"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Render Dist</label><input class="form-input" id="w-RENDER_DISTANCE" value="28" type="number"></div>
+        <div class="form-group"><label class="form-label">Flight Y</label><input class="form-input" id="w-FLY_Y" value="200" type="number"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Grid Step</label><input class="form-input" id="w-GRID_STEP" value="160" type="number"></div>
+        <div class="form-group"><label class="form-label">World Path</label><input class="form-input" id="w-WORLD_PATH" value="./mc-data/world"></div>
+      </div>
+      <div class="form-group"><label class="form-label">Follow Player (optional)</label><input class="form-input" id="w-FOLLOW_PLAYER" placeholder="Player name to follow"></div>
+      <div class="modal-actions">
+        <button class="btn btn-o" onclick="closeWizard()">Cancel</button>
+        <button class="btn btn-p" onclick="saveWizard()">Save &amp; Launch</button>
+      </div>
+    </div>
+  </div>
 
-<div class="cards" id="cards"></div>
+  <!-- Main UI -->
+  <div class="topbar">
+    <div>
+      <h1>&#127760; World Visitor Bot</h1>
+      <span style="font-size:.72rem;color:var(--text3)" id="clock"></span>
+    </div>
+    <div class="topbar-actions">
+      <button class="btn btn-p" onclick="openWizard()">&#9881; Setup</button>
+      <button class="btn btn-g" onclick="act('start-all')">&#9654; Start</button>
+      <button class="btn btn-r" onclick="confirmAction('stop-all','Stop all services?')">&#9632; Stop</button>
+      <button class="btn btn-y" onclick="confirmAction('prune','Prune &amp; rebuild all containers?')">&#8635; Prune</button>
+    </div>
+  </div>
 
-<div class="progress" id="prog" style="display:none">
-  <h2>&#128200; Progress</h2>
-  <div class="bar"><div class="bar-fill" id="bar" style="width:0%">0%</div></div>
-  <div class="info-row"><span id="p1"></span><span id="p2"></span></div>
-  <div class="info-detail" id="p3"></div>
-</div>
+  <!-- Service status cards -->
+  <div class="grid3" id="cards"></div>
 
-<div class="logs">
-  <h2>&#128220; Live Logs</h2>
-  <div class="log-box" id="logbox">Connecting...</div>
-</div>
+  <!-- Stats cards -->
+  <div class="grid3" id="stats-cards"></div>
+
+  <!-- Progress -->
+  <div class="card progress-card anim-in" id="prog-card" style="display:none">
+    <div class="progress-header"><h2>&#128200; Visit Progress</h2><span id="prog-pct">0%</span></div>
+    <div class="bar"><div class="bar-fill" id="prog-bar" style="width:0%"></div></div>
+    <div class="progress-meta"><span id="prog-regions">0/0 regions</span><span id="prog-pos"></span></div>
+  </div>
+
+  <!-- Controls & MC Logs tabs -->
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('controls')">&#9881; Control Log</button>
+    <button class="tab" onclick="switchTab('mc')">&#128295; MC Server Log</button>
+  </div>
+  <div class="log-box" id="log-box" style="height:260px">Connecting...</div>
+  <div class="log-box" id="mc-log-box" style="height:260px;display:none">Waiting for MC server logs...</div>
 </div>
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
 const $=id=>document.getElementById(id);
-const logEl=$('logbox');
-let lines=[];
+const sio=io();
+let confirmCb=null;
+let lastLog=null;
 
-function add(msg,cls){
-  const t=new Date().toLocaleTimeString();
-  lines.push(`<span class="t">${t}</span> <span class="${cls||''}">${he(msg)}</span>`);
-  if(lines.length>200)lines.shift();
-  logEl.innerHTML=lines.join('\n');
-  logEl.scrollTop=logEl.scrollHeight;
+function act(cmd){sio.emit('action',cmd)}
+
+function confirmAction(cmd,msg){
+  $('confirm-title').textContent='Confirm';
+  $('confirm-body').textContent=msg;
+  confirmCb=()=>act(cmd);
+  $('confirm-modal').classList.add('open');
+}
+function closeConfirm(){$('confirm-modal').classList.remove('open');confirmCb=null}
+$('confirm-ok').onclick=()=>{if(confirmCb)confirmCb();closeConfirm()};
+$('confirm-modal').onclick=e=>{if(e.target===$('confirm-modal'))closeConfirm()}
+
+function openWizard(){
+  fetch('/api/env').then(r=>r.json()).then(cfg=>{
+    $('w-MC_HOST').value=cfg.MC_HOST||'mc';
+    $('w-MC_PORT').value=cfg.MC_PORT||'25565';
+    $('w-MC_USERNAME').value=cfg.MC_USERNAME||'Bot';
+    $('w-BOT_COUNT').value=cfg.BOT_COUNT||'1';
+    $('w-RENDER_DISTANCE').value=cfg.RENDER_DISTANCE||'28';
+    $('w-FLY_Y').value=cfg.FLY_Y||'200';
+    $('w-GRID_STEP').value=cfg.GRID_STEP||'160';
+    $('w-WORLD_PATH').value=cfg.WORLD_PATH||'./mc-data/world';
+    $('w-FOLLOW_PLAYER').value=cfg.FOLLOW_PLAYER||'';
+  }).catch(()=>{});
+  $('wizard-modal').classList.add('open');
+}
+function closeWizard(){$('wizard-modal').classList.remove('open')}
+$('wizard-modal').onclick=e=>{if(e.target===$('wizard-modal'))closeWizard()}
+
+function saveWizard(){
+  const settings={
+    MC_HOST:$('w-MC_HOST').value,MC_PORT:$('w-MC_PORT').value,
+    MC_USERNAME:$('w-MC_USERNAME').value,BOT_COUNT:$('w-BOT_COUNT').value,
+    RENDER_DISTANCE:$('w-RENDER_DISTANCE').value,FLY_Y:$('w-FLY_Y').value,
+    GRID_STEP:$('w-GRID_STEP').value,WORLD_PATH:$('w-WORLD_PATH').value,
+    FOLLOW_PLAYER:$('w-FOLLOW_PLAYER').value
+  };
+  fetch('/api/wizard',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(settings)})
+    .then(()=>{closeWizard();act('start-all')});
+}
+
+function switchTab(tab){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  if(tab==='controls'){$('log-box').style.display='';$('mc-log-box').style.display='none';event.target.classList.add('active')}
+  else{$('log-box').style.display='none';$('mc-log-box').style.display='';event.target.classList.add('active')}
+  document.querySelectorAll('.tab')[tab==='controls'?0:1].classList.add('active');
+}
+
+// Log rendering
+function renderLog(el,data,key){
+  if(!el._lines)el._lines=[];
+  const t=new Date(data.time).toLocaleTimeString();
+  el._lines.push(`<span class="t">${t}</span> <span class="${data.level||'m'}">${he(data.msg)}</span>`);
+  if(el._lines.length>300)el._lines=el._lines.slice(-300);
+  el.innerHTML=el._lines.join('\n');
+  el.scrollTop=el.scrollHeight;
 }
 function he(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 
-const sio=io();
-sio.on('connect',()=>add('Connected','d'));
-sio.on('disconnect',()=>add('Disconnected','e'));
-sio.on('log',d=>add(d.msg,{info:'i',warn:'w',error:'e',done:'d'}[d.level]||''));
-sio.on('status',render);
+sio.on('log',d=>renderLog($('log-box'),d,'log'));
+sio.on('mclog',d=>renderLog($('mc-log-box'),d,'mc'));
+
+function renderStats(stats){
+  if(!stats||!Object.keys(stats).length){
+    $('stats-cards').innerHTML='';return;
+  }
+  let h='';
+  for(const [name,s] of Object.entries(stats)){
+    const label=name==='mc'?'MC Server':name==='visitor'?'Visitor':'BlueMap';
+    const icon=name==='mc'?'&#128421;':name==='visitor'?'&#129302;':'&#128506;';
+    h+=`<div class="card">
+      <div class="card-header"><span class="card-title">${icon} ${label}</span></div>
+      <div class="stat-row"><span class="stat-label">CPU</span><span class="stat-val">${s.cpu.trim()}</span></div>
+      <div class="stat-row"><span class="stat-label">Memory</span><span class="stat-val">${s.mem.trim()}</span></div>
+      <div class="stat-row"><span class="stat-label">Network</span><span class="stat-val">${s.net.trim()}</span></div>
+    </div>`;
+  }
+  $('stats-cards').innerHTML=h;
+}
 
 function render(s){
   const svcs=[
-    {k:'mc',l:'MC Server'},
-    {k:'visitor',l:'Visitor Bot'},
-    {k:'bluemap',l:'BlueMap'}
+    {k:'mc',l:'MC Server',icon:'&#128421;'},
+    {k:'visitor',l:'Visitor Bot',icon:'&#129302;'},
+    {k:'bluemap',l:'BlueMap',icon:'&#128506;'}
   ];
   let h='';
   for(const sv of svcs){
-    const st=s[sv.k]||'unknown';
+    const st=s[sv.k]||'stopped';
     h+=`<div class="card">
-      <div class="card-head"><span class="dot ${st}"></span><span class="card-title">${sv.l}</span></div>
-      <div class="card-sub">${st}</div>
-      <div class="card-actions">
-        <button class="btn btn-go" onclick="act('start-${sv.k}')">Start</button>
-        <button class="btn btn-stop" onclick="act('stop-${sv.k}')">Stop</button>
+      <div class="card-header"><span class="dot ${st}"></span><span class="card-title">${sv.icon} ${sv.l}</span></div>
+      <div class="card-sub" style="text-transform:uppercase">${st}</div>
+      <div style="display:flex;gap:6px;margin-top:10px">
+        <button class="btn btn-g btn-sm" onclick="act('start-${sv.k}')">Start</button>
+        <button class="btn btn-r btn-sm" onclick="act('stop-${sv.k}')">Stop</button>
       </div></div>`;
   }
   $('cards').innerHTML=h;
 
   const p=s.progress||{};
-  if(!p.total){$('prog').style.display='none';return}
-  $('prog').style.display='block';
-  const pct=Math.round(p.regions/p.total*100)||0;
-  $('bar').style.width=pct+'%';
-  $('bar').textContent=pct+'%';
-  $('p1').textContent=`Regions: ${p.regions}/${p.total}`;
-  $('p2').textContent=pct+'%';
-  $('p3').textContent=p.detail||`Current: r.${p.rx},${p.rz}`;
+  if(!p.total){$('prog-card').style.display='none'}
+  else{
+    $('prog-card').style.display='';
+    const pct=Math.round(p.regions/p.total*100)||0;
+    $('prog-bar').style.width=pct+'%';
+    $('prog-bar').textContent=pct+'%';
+    $('prog-pct').textContent=pct+'%';
+    $('prog-regions').textContent=`${p.regions}/${p.total} regions`;
+    $('prog-pos').textContent=p.rx||p.rz?`r.${p.rx},${p.rz}`:'';
+  }
+
+  if(s.stats)renderStats(s.stats);
 }
 
-function act(cmd){add('[cmd] '+cmd,'i');sio.emit('action',cmd)}
+sio.on('status',render);
+sio.on('connect',()=>renderLog($('log-box'),{msg:'Connected',level:'d',time:new Date().toISOString()},'log'));
+sio.on('disconnect',()=>renderLog($('log-box'),{msg:'Disconnected',level:'e',time:new Date().toISOString()},'log'));
 
 setInterval(()=>{$('clock').textContent=new Date().toLocaleString()},1000);
 </script>
