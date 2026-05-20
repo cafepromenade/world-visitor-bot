@@ -45,42 +45,55 @@ function getConnectionInfo() {
 }
 
 function compose(args) {
+  const cmd = `docker compose --project-directory ${PROJECT_DIR} ${args}`;
+  console.log(`[compose] ${cmd}`);
   return new Promise((resolve) => {
-    exec(`docker compose --project-directory ${PROJECT_DIR} ${args}`, { timeout: 180000, maxBuffer: 1024 * 1024 * 10 }, (err, stdout, stderr) => {
+    exec(cmd, { timeout: 180000, maxBuffer: 1024 * 1024 * 10 }, (err, stdout, stderr) => {
+      if (stdout.trim()) console.log(`[compose:out] ${stdout.trim().slice(0, 500)}`);
+      if (stderr.trim()) console.log(`[compose:err] ${stderr.trim().slice(0, 500)}`);
+      if (err) console.log(`[compose:exit] error: ${err.message}`);
       resolve({ ok: !err, stdout: stdout || '', stderr: stderr || '' });
     });
   });
 }
 
-function run(cmd) {
+function run(cmd, quiet) {
+  if (!quiet) console.log(`[run] ${cmd}`);
   return new Promise((resolve) => {
     exec(cmd, { timeout: 15000 }, (err, stdout, stderr) => {
+      if (!quiet && err && stderr) console.log(`[run:err] ${(stderr||'').trim().slice(0, 300)}`);
       resolve({ ok: !err, stdout: stdout || '', stderr: stderr || '' });
     });
   });
 }
 
-async function getStatus() {
+async function getStatus(quiet) {
+  if (!quiet) console.log('[status] checking...');
   const [mc, visitor, bluemap] = await Promise.all([
-    run(`docker inspect mc --format='{{.State.Status}}' 2>/dev/null`),
-    run(`docker inspect visitor --format='{{.State.Status}}' 2>/dev/null`),
-    run(`docker inspect bluemap --format='{{.State.Status}}' 2>/dev/null`),
+    run(`docker compose --project-directory ${PROJECT_DIR} ps mc --format '{{.Status}}' 2>/dev/null`, quiet),
+    run(`docker compose --project-directory ${PROJECT_DIR} ps visitor --format '{{.Status}}' 2>/dev/null`, quiet),
+    run(`docker compose --project-directory ${PROJECT_DIR} ps bluemap --format '{{.Status}}' 2>/dev/null`, quiet),
   ]);
-  return {
-    mc: mc.stdout.trim() || 'stopped',
-    visitor: visitor.stdout.trim() || 'stopped',
-    bluemap: bluemap.stdout.trim() || 'stopped',
+  const parse = (out) => {
+    if (!out.trim()) return 'stopped';
+    if (out.includes('Up')) return 'running';
+    if (out.includes('starting') || out.includes('health')) return 'starting';
+    return 'stopped';
   };
+  const s = { mc: parse(mc.stdout), visitor: parse(visitor.stdout), bluemap: parse(bluemap.stdout) };
+  if (!quiet) console.log(`[status] mc=${s.mc} visitor=${s.visitor} bluemap=${s.bluemap}`);
+  return s;
 }
 
-async function getStats() {
-  const { stdout } = await run(`docker stats mc visitor bluemap --no-stream --format '{{.Name}}:{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}|{{.NetIO}}' 2>/dev/null`);
+async function getStats(quiet) {
+  const { stdout } = await run(`docker stats --no-stream --format '{{.Name}}:{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}|{{.NetIO}}' 2>/dev/null`, quiet);
   const stats = {};
   for (const line of stdout.split('\n').filter(Boolean)) {
     const [name, rest] = line.split(':');
-    if (rest) {
+    if (rest && (name.includes('mc') || name.includes('visitor') || name.includes('bluemap'))) {
       const [cpu, mem, memPct, net] = rest.split('|');
-      stats[name] = { cpu, mem, memPct, net };
+      const key = name.includes('mc-') ? 'mc' : name.includes('visitor-') ? 'visitor' : name.includes('bluemap-') ? 'bluemap' : null;
+      if (key) stats[key] = { cpu, mem, memPct, net };
     }
   }
   return stats;
@@ -188,8 +201,11 @@ function createRconPacket(id, type, body) {
 function log(io, msg, level) { io.emit('log', { msg, level }); }
 
 async function buildImage(io) {
+  console.log('[build] building bot image...');
   log(io, 'Building bot Docker image...', 'info');
   const r = await compose('build visitor');
+  console.log(`[build] ${r.ok ? 'SUCCESS' : 'FAILED'}`);
+  if (!r.ok) console.log(`[build:err] ${(r.stderr || r.stdout).slice(-500)}`);
   log(io, r.ok ? 'Build complete' : 'Build FAILED: ' + (r.stderr || r.stdout).slice(-300), r.ok ? 'done' : 'error');
   return r.ok;
 }
@@ -222,6 +238,7 @@ async function doPrune(io) {
 }
 
 async function doAction(io, cmd) {
+  console.log(`[action] ${cmd}`);
   if (cmd.startsWith('cmd:')) {
     const mcCmd = cmd.slice(4);
     log(io, '$ ' + mcCmd, 'info');
@@ -234,8 +251,17 @@ async function doAction(io, cmd) {
   log(io, '> ' + cmd, 'info');
   let r;
   switch (cmd) {
-    case 'start-all': r = await compose('up -d mc visitor bluemap'); log(io, r.ok ? 'All services started' : 'Failed: ' + (r.stderr || '').slice(-200), r.ok ? 'done' : 'error'); break;
-    case 'stop-all': r = await compose('stop mc visitor bluemap'); log(io, 'All services stopped', 'done'); break;
+    case 'start-all':
+      console.log('[action] starting all services...');
+      r = await compose('up -d mc visitor bluemap');
+      console.log(`[action] start-all: ${r.ok ? 'OK' : 'FAILED'} ${(r.stderr || '').slice(0, 200)}`);
+      log(io, r.ok ? 'All services started' : 'Failed: ' + (r.stderr || '').slice(-200), r.ok ? 'done' : 'error');
+      break;
+    case 'stop-all':
+      console.log('[action] stopping all services...');
+      r = await compose('stop mc visitor bluemap');
+      log(io, 'All services stopped', 'done');
+      break;
     case 'prune': await doPrune(io); return;
     case 'start-mc': r = await compose('up -d --no-deps mc'); log(io, 'MC server starting...', 'info'); break;
     case 'stop-mc': r = await compose('stop mc'); log(io, 'MC server stopped', 'done'); break;
@@ -249,9 +275,10 @@ async function doAction(io, cmd) {
   await pushAll(io);
 }
 
-async function pushAll(io) {
-  const [status, progress, stats] = await Promise.all([getStatus(), Promise.resolve(getProgress()), getStats()]);
+async function pushAll(io, quiet) {
+  const [status, progress, stats] = await Promise.all([getStatus(quiet), Promise.resolve(getProgress()), getStats(quiet)]);
   io.emit('status', { ...status, progress, stats, conn: getConnectionInfo() });
+  if (!quiet) console.log('[push] status sent to clients');
 }
 
 function setupServer(p) {
@@ -298,15 +325,17 @@ async function main() {
 
   [s1.io, s2.io].forEach(io => {
     io.on('connection', socket => {
+      console.log('[socket] client connected');
       log(io, 'Connected', 'info');
       pushAll(io);
       socket.on('action', cmd => doAction(io, cmd));
     });
   });
 
+  console.log('[timer] starting periodic status checks (every 4s, quiet)');
   setInterval(async () => {
-    await pushAll(s1.io);
-    await pushAll(s2.io);
+    await pushAll(s1.io, true);
+    await pushAll(s2.io, true);
   }, 4000);
 
   s1.server.listen(PORT, () => console.log(`Panel: http://0.0.0.0:${PORT} (IP: ${LOCAL_IP})`));
