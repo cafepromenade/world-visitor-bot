@@ -7,8 +7,9 @@ services:
       - '3000:3000'
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - .:/app/project
+      - ${PWD:-/home/docker/world-visitor-bot}:${PWD:-/home/docker/world-visitor-bot}
     environment:
+      - PROJECT_DIR=${PWD:-/home/docker/world-visitor-bot}
       - DOMAIN=${DOMAIN:-bigheados.com}
       - HOST_IP=${HOST_IP:-}
       - PORT=80
