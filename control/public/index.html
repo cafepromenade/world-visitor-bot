@@ -146,6 +146,7 @@ body{font-family:'Google Sans','Inter',sans-serif;background:var(--bg);color:var
   <div class="modal-overlay" id="confirm-modal">
     <div class="modal"><div class="modal-inner">
       <h2 id="confirm-title" style="font-size:1.05rem;font-weight:500;margin-bottom:6px">Confirm</h2>
+      <div id="confirm-danger-icon" style="display:none;font-size:2rem;margin-bottom:8px;color:var(--red)">&#9888;</div>
       <p id="confirm-body" style="font-size:.78rem;color:var(--text2);margin-bottom:10px">Are you sure?</p>
       <div style="display:flex;gap:8px;justify-content:flex-end">
         <button class="btn btn-o" onclick="closeConfirm()">Cancel</button>
@@ -205,7 +206,7 @@ body{font-family:'Google Sans','Inter',sans-serif;background:var(--bg);color:var
           <div class="state-mgr">
             <p style="font-size:.75rem;font-weight:500;margin-bottom:6px;color:var(--text2)">Visited State Data</p>
             <p style="font-size:.65rem;color:var(--text3);margin-bottom:8px">Edit the visited.json state directly, or paste new JSON to auto-parse and merge.</p>
-            <textarea id="wiz-state-json" placeholder='{"r.0.0":true,"r.1.0":true,...}'></textarea>
+            <textarea id="wiz-state-json" placeholder='{"0,0":true,"1,0":true,...}'></textarea>
             <div style="display:flex;gap:6px;margin-top:6px">
               <button class="btn btn-t btn-sm" onclick="wizLoadState()">Load Current</button>
               <button class="btn btn-f btn-sm" onclick="wizParseState()">Auto-Parse</button>
@@ -261,8 +262,9 @@ body{font-family:'Google Sans','Inter',sans-serif;background:var(--bg);color:var
     <div class="topbar-actions">
       <button class="btn btn-f" onclick="openWizard()">Setup</button>
       <button class="btn btn-t" onclick="openState()">States</button>
-      <button class="btn btn-f" style="background:var(--green)" onclick="act('start-all')">Start</button>
+      <button class="btn btn-f" style="background:var(--green)" onclick="act('run-bot')">Run the Bot</button>
       <button class="btn btn-o btn-danger" onclick="confirmAction('stop-all','Stop all services? MC server and bots will shut down.')">Stop</button>
+      <button class="btn btn-o btn-danger" onclick="confirmDanger('force-stop','Force stop all containers immediately? This is a hard shutdown and can interrupt saves or rendering.')">Force Stop</button>
       <button class="btn btn-o btn-danger" onclick="confirmAction('prune','Prune all containers and rebuild? This will remove containers and rebuild the bot image.')">Prune</button>
     </div>
   </div>
@@ -292,6 +294,15 @@ body{font-family:'Google Sans','Inter',sans-serif;background:var(--bg);color:var
     <div class="progress-top"><h2>Visit Progress</h2><span class="progress-pct" id="prog-pct">0%</span></div>
     <div class="bar"><div class="bar-fill" id="prog-bar" style="width:0%"></div></div>
     <div class="progress-meta"><span id="prog-regions">0/0 regions</span><span id="prog-pos"></span></div>
+    <div style="margin-top:12px">
+      <div class="progress-meta"><span>Waypoint Progress</span><span id="wp-count">0/0</span></div>
+      <div class="bar" style="height:20px;margin-top:4px"><div class="bar-fill" id="wp-bar" style="width:0%"></div></div>
+    </div>
+    <div class="grid3" style="margin-top:10px">
+      <div class="card" style="padding:10px"><div class="card-sub">Waypoint ETA</div><div class="stat-v" id="eta-wp">--</div></div>
+      <div class="card" style="padding:10px"><div class="card-sub">Region ETA</div><div class="stat-v" id="eta-region">--</div></div>
+      <div class="card" style="padding:10px"><div class="card-sub">Total ETA</div><div class="stat-v" id="eta-total">--</div></div>
+    </div>
   </div>
 
   <div class="tabs" style="position:relative">
@@ -314,6 +325,7 @@ let confirmCb=null, wizStep=0, wizFollow=[], wizBotNames=[], wizBotMem=[];
 function act(cmd){sio.emit('action',cmd)}
 function confirmAction(cmd,msg){
   $('confirm-title').textContent='Confirm'; $('confirm-body').textContent=msg;
+  $('confirm-danger-icon').style.display='none';
   confirmCb=()=>{
     if(cmd==='prune'){
       $('prune-modal').classList.add('open');
@@ -324,6 +336,13 @@ function confirmAction(cmd,msg){
     }
     act(cmd);
   };
+  $('confirm-modal').classList.add('open');
+}
+function confirmDanger(cmd,msg){
+  $('confirm-title').textContent='Danger Zone';
+  $('confirm-body').textContent=msg;
+  $('confirm-danger-icon').style.display='block';
+  confirmCb=()=>act(cmd);
   $('confirm-modal').classList.add('open');
 }
 function closeConfirm(){$('confirm-modal').classList.remove('open');confirmCb=null}
@@ -341,6 +360,7 @@ function sendCmd(){
 sio.on('cmd-result',d=>{ $('cmd-result').textContent=d; });
 
 function switchTab(t){
+  activeTab=t;
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   $('log-box').style.display='none'; $('mc-log-box').style.display='none'; $('bm-log-box').style.display='none';
   if(t==='controls'){$('log-box').style.display='';document.querySelectorAll('.tab')[0].classList.add('active')}
@@ -350,7 +370,7 @@ function switchTab(t){
 
 function renderLog(el,data){
   if(!el._l)el._l=[];
-  const t=new Date().toLocaleTimeString();
+  const t=new Date().toLocaleTimeString([], {hour12:false});
   el._l.push('<span class="t">'+t+'</span> <span class="'+(data.level||'m')+'">'+he(data.msg)+'</span>');
   if(el._l.length>400)el._l=el._l.slice(-400);
   el.innerHTML=el._l.join('\n'); el.scrollTop=el.scrollHeight;
@@ -358,6 +378,7 @@ function renderLog(el,data){
 function he(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 
 sio.on('log',d=>renderLog($('log-box'),d));
+sio.on('visitor-log',d=>renderLog($('log-box'),{msg:d.msg,level:'m'}));
 sio.on('mclog',d=>renderLog($('mc-log-box'),d));
 sio.on('bmlog',d=>renderLog($('bm-log-box'),d));
 
@@ -385,17 +406,29 @@ function setTheme(s){
 
 function render(s){
   setTheme(s);
+  const botState = (s.mc==='running' || s.visitor==='running') ? 'running' : (s.mc==='starting' || s.visitor==='starting') ? 'starting' : 'stopped';
   const svcs=[
-    {k:'mc',l:'MC Server',icon:'&#128421;'},
-    {k:'visitor',l:'Visitor Bot',icon:'&#129302;'},
-    {k:'bluemap',l:'BlueMap',icon:'&#128506;'}
+    {k:'bot',l:'Bot Stack',icon:'&#129302;',state:botState},
+    {k:'bluemap',l:'BlueMap',icon:'&#128506;',state:s.bluemap||'stopped'}
   ];
   let h='';
   for(const sv of svcs){
-    const st=s[sv.k]||'stopped';
+    const st=sv.state||'stopped';
     const stLabel = st==='running'?'RUNNING':st==='starting'?'STARTING':'STOPPED';
     const stColor = st==='running'?'var(--green)':st==='starting'?'var(--yellow)':'var(--red)';
-    h+='<div class="card"><div class="card-hd"><span class="dot '+st+'"></span><span class="card-ttl">'+sv.icon+' '+sv.l+'</span></div><div class="card-sub" style="color:'+stColor+'">'+stLabel+'</div><div style="display:flex;gap:4px;margin-top:8px"><button class="btn btn-o btn-sm" style="color:var(--green);border-color:var(--green)44" onclick="act(\'start-'+sv.k+'\')">Start</button><button class="btn btn-o btn-sm" style="color:var(--red);border-color:var(--red)44" onclick="act(\'stop-'+sv.k+'\')">Stop</button></div></div>';
+
+    const isBlueMap = sv.k === 'bluemap';
+    const botRunning = (s.visitor === 'running' || s.visitor === 'starting' || s.mc === 'running');
+    const bmDisabled = isBlueMap && botRunning && st === 'stopped';
+    const bmDisabledWhy = bmDisabled ? 'BlueMap auto-runs with bot' : '';
+    const startCmd = sv.k==='bot' ? 'run-bot' : 'start-bluemap';
+    const stopCmd = sv.k==='bot' ? 'stop-all' : 'stop-bluemap';
+
+    h+='<div class="card"><div class="card-hd"><span class="dot '+st+'"></span><span class="card-ttl">'+sv.icon+' '+sv.l+'</span></div><div class="card-sub" style="color:'+stColor+'">'+stLabel+'</div>'
+      + (bmDisabledWhy ? '<div style="font-size:.6rem;color:var(--text3);margin-top:2px">'+bmDisabledWhy+'</div>' : '')
+      + '<div style="display:flex;gap:4px;margin-top:8px">'
+      + '<button class="btn btn-o btn-sm" style="color:var(--green);border-color:var(--green)44" onclick="act(\''+startCmd+'\')"'+ (bmDisabled?' disabled':'') +'>'+(sv.k==='bot'?'Run':'Start')+'</button>'
+      + '<button class="btn btn-o btn-sm" style="color:var(--red);border-color:var(--red)44" onclick="confirmAction(\''+stopCmd+'\',\'Stop '+sv.l+'?\')"'+ (bmDisabled?' disabled':'') +'>Stop</button></div></div>';
   }
   $('cards').innerHTML=h;
 
@@ -403,12 +436,21 @@ function render(s){
   if(!p.total) $('prog-card').style.display='none';
   else{
     $('prog-card').style.display='';
-    const pct=Math.round(p.regions/p.total*100)||0;
+    const pct=Math.min(100, Math.round(p.pct ?? (p.regions/p.total*100))||0);
     $('prog-bar').style.width=pct+'%'; $('prog-bar').textContent=pct+'%';
     $('prog-pct').textContent=pct+'%';
     $('prog-regions').textContent=p.regions+'/'+p.total+' regions';
     $('prog-pos').textContent=p.rx||p.rz?'r.'+p.rx+','+p.rz:'';
   }
+
+  const eta=s.eta||{};
+  const wpPct=Math.min(100, eta.wpPct||0);
+  $('wp-bar').style.width=wpPct+'%';
+  $('wp-bar').textContent=wpPct?wpPct+'%':'';
+  $('wp-count').textContent=(eta.wpDone||0)+'/'+(eta.wpTotal||0);
+  $('eta-wp').textContent=eta.wp||'--';
+  $('eta-region').textContent=eta.region||'--';
+  $('eta-total').textContent=eta.total||'--';
 
   if(s.stats)renderStats(s.stats,s);
 
@@ -439,7 +481,8 @@ sio.on('prune-step',d=>{
   $('prune-bar').style.width=pct+'%';
   $('prune-bar').textContent=pct+'%';
   $('prune-msg').textContent=d.msg;
-  $('prune-log').innerHTML+='<span class="i">'+d.msg+'</span>\n';
+  $('prune-log').innerHTML+='<span class="i">'+he(d.msg)+'</span>'+(d.detail?'\n<span class="m">'+he(d.detail)+'</span>':'')+'\n';
+  $('prune-log').scrollTop=$('prune-log').scrollHeight;
 });
 
 sio.on('prune-done',d=>{
@@ -488,7 +531,7 @@ function closeWizard(){$('wizard-modal').classList.remove('open')}
 $('wizard-modal').onclick=e=>{if(e.target===$('wizard-modal'))closeWizard()}
 
 function wizUpdateBotCount(){
-  const n=parseInt($('wiz-BOT_COUNT').value)||1;
+  let n=parseInt($('wiz-BOT_COUNT').value)||1;
   if(n<1)n=1; if(n>4)n=4;
   $('wiz-BOT_COUNT').value=n;
   if(n<=1){$('wiz-bot-tabs').style.display='none';return}
@@ -588,7 +631,7 @@ function wizLaunch(){
   }
   fetch('/api/wizard',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(settings)})
     .then(r=>r.json()).then(d=>{
-      if(d.ok){closeWizard();act('start-all')}
+      if(d.ok){closeWizard();act('run-bot')}
       else renderLog($('log-box'),{msg:'Save failed: '+(d.error||'unknown'),level:'e'});
     });
 }
@@ -612,7 +655,7 @@ function openState(){
 function closeState(){$('state-modal').classList.remove('open')}
 $('state-modal').onclick=e=>{if(e.target===$('state-modal'))closeState()}
 
-setInterval(()=>{$('clock').textContent=new Date().toLocaleString()},1000);
+setInterval(()=>{$('clock').textContent=new Date().toLocaleString([], {hour12:false})},1000);
 </script>
 </body>
 </html>
