@@ -5,283 +5,354 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
 <title>World Visitor Bot</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Google+Sans+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:#0d1117; --surface:#161b22; --card:#1c2333; --border:#30363d;
-  --primary:#58a6ff; --primary-dim:#388bfd33; --green:#3fb950; --red:#f85149;
-  --yellow:#d2991d; --text:#e6edf3; --text2:#8b949e; --text3:#6e7681;
-  --radius:12px; --radius-sm:8px; --shadow:0 1px 3px rgba(0,0,0,.3);
-  --transition:0.2s cubic-bezier(.4,0,.2,1);
+  --bg:#0f1117; --surface:#181b24; --card:#1f2333; --border:#2a2e3d;
+  --primary:#8ab4f8; --green:#34a853; --red:#ea4335;
+  --yellow:#fbbc04; --text:#e8eaed; --text2:#9aa0a6; --text3:#5f6368;
+  --radius:16px; --radius-sm:10px; --t:0.3s cubic-bezier(.4,0,.2,1); --spring:0.45s cubic-bezier(.34,1.56,.64,1);
+  --accent:var(--primary);
 }
+body.idle{--bg:#0f1117;--surface:#181b24;--card:#1f2333;--border:#2a2e3d;--accent:var(--primary)}
+body.running{--bg:#1a1c1e;--surface:#242629;--card:#2d3035;--border:#3c4043;--accent:var(--green)}
+body.error{--bg:#1a1014;--surface:#241216;--card:#30161c;--border:#3d1f26;--accent:var(--red)}
+
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html{font-size:16px}
-body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
-.app{max-width:960px;margin:0 auto;padding:0 16px 32px}
+body{font-family:'Google Sans','Inter',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;transition:background .6s,color .4s}
+.app{max-width:1024px;margin:0 auto;padding:0 16px 40px}
 
-/* Top bar */
-.topbar{display:flex;align-items:center;justify-content:space-between;padding:16px 0 12px;gap:12px;flex-wrap:wrap}
-.topbar h1{font-size:1.25rem;font-weight:700;letter-spacing:-0.02em}
-.topbar-actions{display:flex;gap:8px;flex-wrap:wrap}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:18px 0 10px;gap:12px;flex-wrap:wrap}
+.topbar-brand{display:flex;align-items:center;gap:10px}
+.topbar-logo{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,var(--accent),#a371f7);display:flex;align-items:center;justify-content:center;font-size:1rem;animation:logoPulse 3s infinite}
+@keyframes logoPulse{0%,100%{box-shadow:0 0 0 0 var(--accent)44}50%{box-shadow:0 0 0 8px transparent}}
+.topbar h1{font-size:1.15rem;font-weight:500;letter-spacing:-0.01em}
+.topbar-sub{font-size:.68rem;color:var(--text2)}
+.topbar-actions{display:flex;gap:6px;flex-wrap:wrap}
 
-/* Buttons */
-.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border:none;border-radius:var(--radius-sm);font:600 0.8rem/1 'Inter',sans-serif;cursor:pointer;transition:var(--transition);text-decoration:none;position:relative;overflow:hidden}
-.btn:active{transform:scale(.96)}
-.btn-p{background:var(--primary);color:#fff}
-.btn-p:hover{filter:brightness(1.1)}
-.btn-g{background:var(--green);color:#000}
-.btn-g:hover{filter:brightness(1.1)}
-.btn-r{background:var(--red);color:#fff}
-.btn-r:hover{filter:brightness(1.1)}
-.btn-y{background:var(--yellow);color:#000}
-.btn-y:hover{filter:brightness(1.1)}
-.btn-o{background:var(--card);color:var(--text);border:1px solid var(--border)}
-.btn-o:hover{background:#243047}
-.btn-sm{padding:5px 10px;font-size:.7rem}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border:none;border-radius:24px;font:500 0.78rem 'Google Sans',sans-serif;cursor:pointer;transition:var(--t);text-decoration:none;position:relative;overflow:hidden}
+.btn::after{content:'';position:absolute;inset:0;background:rgba(255,255,255,.06);opacity:0;transition:opacity .2s}
+.btn:hover::after{opacity:1}
+.btn:active{transform:scale(.94)}
+.btn-f{background:var(--accent);color:#000}
+.btn-t{background:var(--accent)22;color:var(--accent)}
+.btn-o{background:transparent;color:var(--text);border:1px solid var(--border)}
+.btn-sm{padding:4px 10px;font-size:.68rem;border-radius:14px}
+.btn-danger{color:var(--red);border-color:var(--red)44}
 
-/* Grid */
-.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin:12px 0}
-.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:12px 0}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin:10px 0}
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin:10px 0}
 
-/* Cards */
-.card{background:var(--card);border-radius:var(--radius);padding:16px;border:1px solid var(--border);transition:var(--transition)}
-.card:hover{border-color:var(--primary-dim)}
-.card-header{display:flex;align-items:center;gap:10px;margin-bottom:10px}
-.card-title{font-size:.9rem;font-weight:600}
-.card-sub{font-size:.72rem;color:var(--text2)}
-.card-body{font-size:.8rem;color:var(--text)}
+.card{background:var(--card);border-radius:var(--radius);padding:16px;border:1px solid var(--border);transition:all var(--t);animation:cardIn .5s var(--spring) forwards}
+@keyframes cardIn{from{opacity:0;transform:translateY(12px) scale(.97)}to{opacity:1;transform:none}}
+.card:hover{border-color:var(--accent)44;transform:translateY(-2px);box-shadow:0 8px 30px rgba(0,0,0,.3)}
+.card-hd{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.card-ttl{font-size:.85rem;font-weight:500}
+.card-sub{font-size:.68rem;color:var(--text2)}
 
-/* Status dot */
-.dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;transition:var(--transition)}
-.dot.running{background:var(--green);box-shadow:0 0 8px var(--green)}
+.dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;transition:var(--t)}
+.dot.running{background:var(--green);box-shadow:0 0 12px var(--green);animation:dotGlow 2s infinite}
 .dot.stopped{background:var(--red);box-shadow:0 0 6px var(--red)}
-.dot.starting{background:var(--yellow);box-shadow:0 0 10px var(--yellow);animation:pulse 1.2s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+.dot.starting{background:var(--yellow);box-shadow:0 0 14px var(--yellow);animation:pulse 1s infinite}
+@keyframes dotGlow{0%,100%{box-shadow:0 0 8px var(--green)}50%{box-shadow:0 0 22px var(--green)}}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(1.4)}}
 
-/* Progress */
 .progress-card{padding:20px}
-.progress-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
-.progress-header h2{font-size:.9rem;font-weight:600;color:var(--text2)}
-.progress-header span{font-size:.8rem;font-weight:700;color:var(--primary)}
-.bar{height:28px;background:#0d1117;border-radius:14px;overflow:hidden;margin-bottom:8px}
-.bar-fill{height:100%;background:linear-gradient(90deg,var(--primary),#a371f7);border-radius:14px;transition:width .6s var(--transition);min-width:0;display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:700;color:#fff}
+.progress-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.progress-top h2{font-size:.88rem;font-weight:500;color:var(--text2)}
+.progress-pct{font-size:1.5rem;font-weight:500;color:var(--accent);transition:color .4s}
+.bar{height:30px;background:var(--bg);border-radius:15px;overflow:hidden;margin-bottom:8px}
+.bar-fill{height:100%;background:linear-gradient(90deg,var(--accent),#a371f7);border-radius:15px;transition:width .8s var(--spring);display:flex;align-items:center;justify-content:center;font-size:.62rem;font-weight:500;color:#fff;position:relative;overflow:hidden}
+.bar-fill::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.15),transparent);animation:shimmer 2s infinite}
+@keyframes shimmer{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
 .progress-meta{display:flex;justify-content:space-between;font-size:.7rem;color:var(--text3)}
 
-/* Stats */
-.stat-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)}
-.stat-row:last-child{border-bottom:none}
-.stat-label{font-size:.75rem;color:var(--text2)}
-.stat-val{font-size:.75rem;font-weight:600;font-family:'JetBrains Mono',monospace}
+.conn-card{border:2px dashed var(--border);text-align:center;padding:18px;transition:all var(--t)}
+.conn-card.running{border-color:var(--green);border-style:solid;background:var(--green)06}
+.conn-addr{font-family:'Google Sans Mono',monospace;font-size:1rem;font-weight:500;margin:6px 0;letter-spacing:.04em}
+.conn-label{font-size:.66rem;color:var(--text2);text-transform:uppercase;letter-spacing:.08em}
 
-/* Logs */
-.log-box{background:#0d1117;border-radius:var(--radius-sm);padding:12px;font:400 .72rem/1.6 'JetBrains Mono',monospace;color:var(--text3);max-height:240px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;border:1px solid var(--border)}
-.log-box .t{color:var(--yellow)}
-.log-box .w{color:var(--yellow)}
-.log-box .e{color:var(--red)}
-.log-box .i{color:var(--primary)}
-.log-box .d{color:var(--green)}
-.log-box .m{color:var(--text3)}
-.section-label{font-size:.78rem;font-weight:600;color:var(--text2);margin:12px 0 6px;display:flex;align-items:center;gap:6px}
+.cmd-box{display:flex;gap:6px;margin-top:6px}
+.cmd-input{flex:1;padding:9px 14px;background:var(--bg);border:1px solid var(--border);border-radius:24px;color:var(--text);font:400 .78rem 'Google Sans Mono',monospace;transition:var(--t)}
+.cmd-input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent)22}
+.cmd-input::placeholder{color:var(--text3)}
 
-/* Modal */
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:100;opacity:0;pointer-events:none;transition:opacity .2s}
+.stat-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;font-size:.7rem}
+.stat-row:not(:last-child){border-bottom:1px solid var(--border)}
+.stat-l{color:var(--text2)}
+.stat-v{font-weight:500;font-family:'Google Sans Mono',monospace}
+
+.log-box{background:var(--bg);border-radius:var(--radius-sm);padding:12px;font:400 .68rem/1.6 'Google Sans Mono',monospace;color:var(--text3);max-height:260px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;border:1px solid var(--border)}
+.log-box .t{color:var(--yellow)} .log-box .e{color:var(--red)} .log-box .i{color:var(--primary)} .log-box .d{color:var(--green)} .log-box .m{color:var(--text3)}
+
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:10px}
+.tab{padding:7px 16px;font-size:.75rem;font-weight:500;color:var(--text2);background:none;border:none;cursor:pointer;border-bottom:2px solid transparent;transition:var(--t)}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:100;opacity:0;pointer-events:none;transition:opacity .25s}
 .modal-overlay.open{opacity:1;pointer-events:auto}
-.modal{background:var(--card);border-radius:16px;padding:24px;width:90%;max-width:440px;max-height:85vh;overflow-y:auto;border:1px solid var(--border);transform:scale(.9) translateY(20px);transition:transform .25s var(--transition)}
+.modal{background:var(--card);border-radius:20px;padding:0;width:92%;max-width:500px;max-height:88vh;overflow-y:auto;border:1px solid var(--border);transform:scale(.9) translateY(24px);transition:transform .35s var(--spring)}
 .modal-overlay.open .modal{transform:scale(1) translateY(0)}
-.modal h2{font-size:1.1rem;font-weight:700;margin-bottom:4px}
-.modal p{font-size:.8rem;color:var(--text2);margin-bottom:16px}
-.modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+.modal-inner{padding:22px}
 
-/* Form */
-.form-group{margin-bottom:12px}
-.form-label{display:block;font-size:.75rem;font-weight:600;color:var(--text2);margin-bottom:4px}
-.form-input{width:100%;padding:8px 12px;background:#0d1117;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font:400 .82rem 'Inter',sans-serif;transition:var(--transition)}
-.form-input:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 2px var(--primary-dim)}
+.wiz-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--card);z-index:1;border-radius:20px 20px 0 0}
+.wiz-header h2{font-size:1rem;font-weight:500;margin:0}
+.wiz-back,.wiz-close{background:none;border:none;color:var(--text2);font-size:1.1rem;cursor:pointer;padding:4px 8px;border-radius:8px;transition:var(--t)}
+.wiz-back:hover,.wiz-close:hover{background:rgba(255,255,255,.06);color:var(--text)}
+.wiz-steps{display:flex;align-items:center;justify-content:center;padding:12px 20px;gap:0}
+.wiz-step{width:26px;height:26px;border-radius:50%;background:var(--card);border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:600;color:var(--text3);transition:var(--t);flex-shrink:0}
+.wiz-step.active{border-color:var(--accent);background:var(--accent)22;color:var(--accent)}
+.wiz-step.done{border-color:var(--green);background:var(--green)22;color:var(--green)}
+.wiz-line{flex:1;height:2px;background:var(--border);margin:0 3px;transition:var(--t)}
+.wiz-line.done{background:var(--green)}
+.wiz-body{padding:18px 20px;min-height:240px}
+.wiz-page{display:none;animation:slideIn .35s var(--spring) forwards}
+.wiz-page.active{display:block}
+@keyframes slideIn{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:none}}
+.wiz-desc{font-size:.75rem;color:var(--text2);margin-bottom:12px}
+.wiz-hint{font-size:.65rem;color:var(--text3);margin-top:2px;line-height:1.4}
+.form-group{margin-bottom:11px}
+.form-label{display:block;font-size:.72rem;font-weight:500;color:var(--text2);margin-bottom:3px}
+.form-input,.form-select{width:100%;padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font:400 .78rem 'Google Sans',sans-serif;transition:var(--t)}
+.form-input:focus,.form-select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent)18}
+.form-select{cursor:pointer}
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-@media(max-width:480px){
+.tag-list{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0}
+.tag{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:var(--accent)18;border-radius:14px;font-size:.7rem;font-weight:500;color:var(--accent)}
+.tag-remove{background:none;border:none;color:var(--accent);cursor:pointer;font-size:.9rem;padding:0 2px;line-height:1}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end;padding:14px 20px;border-top:1px solid var(--border)}
+
+.wiz-review{display:flex;flex-direction:column;gap:6px}
+.wiz-review-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:.75rem}
+.wiz-review-row:last-child{border:none}
+.wiz-review-l{color:var(--text2)} .wiz-review-v{color:var(--text);font-weight:500}
+
+.state-mgr{border:1px dashed var(--border);border-radius:var(--radius);padding:14px;margin-top:8px}
+.state-mgr textarea{width:100%;height:120px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font:400 .7rem 'Google Sans Mono',monospace;padding:10px;resize:vertical}
+
+@media(max-width:520px){
   .topbar{flex-direction:column;align-items:flex-start}
-  .grid2{grid-template-columns:1fr}
-  .grid3{grid-template-columns:1fr}
+  .grid2,.grid3{grid-template-columns:1fr}
   .form-row{grid-template-columns:1fr}
+  .modal{max-width:96vw}
 }
-
-/* Animations */
-@keyframes slideUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
-.anim-in{animation:slideUp .35s var(--transition) forwards}
-
-/* Tabs */
-.tabs{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:12px}
-.tab{padding:8px 16px;font-size:.78rem;font-weight:600;color:var(--text2);background:none;border:none;cursor:pointer;border-bottom:2px solid transparent;transition:var(--transition)}
-.tab.active{color:var(--primary);border-bottom-color:var(--primary)}
 </style>
 </head>
-<body>
+<body class="idle">
+
 <div class="app">
-  <!-- Confirm modal -->
+  <!-- Confirm Modal -->
   <div class="modal-overlay" id="confirm-modal">
-    <div class="modal">
-      <h2 id="confirm-title">Confirm</h2>
-      <p id="confirm-body">Are you sure?</p>
-      <div class="modal-actions">
+    <div class="modal"><div class="modal-inner">
+      <h2 id="confirm-title" style="font-size:1.05rem;font-weight:500;margin-bottom:6px">Confirm</h2>
+      <p id="confirm-body" style="font-size:.78rem;color:var(--text2);margin-bottom:10px">Are you sure?</p>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
         <button class="btn btn-o" onclick="closeConfirm()">Cancel</button>
-        <button class="btn btn-r" id="confirm-ok">Confirm</button>
+        <button class="btn btn-f" id="confirm-ok" style="background:var(--red)">Confirm</button>
       </div>
-    </div>
+    </div></div>
   </div>
 
-  <!-- Wizard modal -->
+  <!-- Wizard Modal -->
   <div class="modal-overlay" id="wizard-modal">
     <div class="modal">
-      <h2>&#9881; Bot Setup</h2>
-      <p>Configure before launching the bot</p>
-      <div class="form-row">
-        <div class="form-group"><label class="form-label">MC Host</label><input class="form-input" id="w-MC_HOST" value="mc"></div>
-        <div class="form-group"><label class="form-label">MC Port</label><input class="form-input" id="w-MC_PORT" value="25565" type="number"></div>
+      <div class="wiz-header">
+        <button class="wiz-back" id="wiz-back" style="visibility:hidden" onclick="wizPrev()">&#8592;</button>
+        <h2 id="wiz-title">Setup Wizard</h2>
+        <button class="wiz-close" onclick="closeWizard()">&times;</button>
       </div>
-      <div class="form-row">
-        <div class="form-group"><label class="form-label">Username</label><input class="form-input" id="w-MC_USERNAME" value="Bot"></div>
-        <div class="form-group"><label class="form-label">Bot Count</label><input class="form-input" id="w-BOT_COUNT" value="1" type="number" min="1" max="4"></div>
+      <div class="wiz-steps" id="wiz-steps">
+        <div class="wiz-step active"><span>1</span></div><div class="wiz-line"></div>
+        <div class="wiz-step"><span>2</span></div><div class="wiz-line"></div>
+        <div class="wiz-step"><span>3</span></div><div class="wiz-line"></div>
+        <div class="wiz-step"><span>4</span></div>
       </div>
-      <div class="form-row">
-        <div class="form-group"><label class="form-label">Render Dist</label><input class="form-input" id="w-RENDER_DISTANCE" value="28" type="number"></div>
-        <div class="form-group"><label class="form-label">Flight Y</label><input class="form-input" id="w-FLY_Y" value="200" type="number"></div>
+      <div class="wiz-body" id="wiz-body">
+        <div class="wiz-page active" data-step="0">
+          <p class="wiz-desc">Bot identity and resources</p>
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">Bot Username</label><input class="form-input" id="wiz-MC_USERNAME" placeholder="Bot"><span class="wiz-hint">Name shown in-game</span></div>
+            <div class="form-group"><label class="form-label">Bot Count (1-4)</label><input class="form-input" id="wiz-BOT_COUNT" type="number" min="1" max="4" placeholder="1" onchange="wizUpdateBotCount()"><span class="wiz-hint">Parallel bots for faster visits</span></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">Server RAM</label><input class="form-input" id="wiz-MC_MEMORY" placeholder="12G"><span class="wiz-hint">Memory for the Minecraft server JVM</span></div>
+            <div class="form-group"><label class="form-label">Bot RAM (each)</label><input class="form-input" id="wiz-BOT_MEMORY" placeholder="2G"><span class="wiz-hint">Container memory limit per bot</span></div>
+          </div>
+          <div id="wiz-bot-tabs" style="display:none">
+            <p class="wiz-desc" style="margin-top:10px">Per-bot overrides</p>
+            <div id="wiz-bot-fields"></div>
+          </div>
+        </div>
+        <div class="wiz-page" data-step="1">
+          <p class="wiz-desc">Exploration parameters</p>
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">Render Distance (chunks)</label><input class="form-input" id="wiz-RENDER_DISTANCE" type="number" placeholder="28"><span class="wiz-hint">How far the bot can see. Higher = more chunks loaded per position but slower</span></div>
+            <div class="form-group"><label class="form-label">Flight Altitude (Y)</label><input class="form-input" id="wiz-FLY_Y" type="number" placeholder="200"><span class="wiz-hint">Height the bot flies at between waypoints. Higher avoids terrain</span></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">Grid Step (blocks)</label><input class="form-input" id="wiz-GRID_STEP" type="number" placeholder="160"><span class="wiz-hint">Distance between waypoints. Lower = denser coverage but slower</span></div>
+            <div class="form-group"><label class="form-label">World Path</label><input class="form-input" id="wiz-WORLD_PATH" placeholder="./mc-data/world"><span class="wiz-hint">Path to the Minecraft world directory on the host</span></div>
+          </div>
+        </div>
+        <div class="wiz-page" data-step="2">
+          <p class="wiz-desc">Follow players & state management</p>
+          <div class="form-group"><label class="form-label">Follow Players</label>
+            <div style="display:flex;gap:6px"><input class="form-input" id="wiz-follow-input" placeholder="Player name" style="flex:1"><button class="btn btn-t btn-sm" onclick="wizAddFollow()">+ Add</button></div>
+            <div class="tag-list" id="wiz-follow-tags"></div>
+            <span class="wiz-hint">These players will be teleported alongside the bot. Leave empty to skip.</span>
+          </div>
+          <div class="state-mgr">
+            <p style="font-size:.75rem;font-weight:500;margin-bottom:6px;color:var(--text2)">Visited State Data</p>
+            <p style="font-size:.65rem;color:var(--text3);margin-bottom:8px">Edit the visited.json state directly, or paste new JSON to auto-parse and merge.</p>
+            <textarea id="wiz-state-json" placeholder='{"r.0.0":true,"r.1.0":true,...}'></textarea>
+            <div style="display:flex;gap:6px;margin-top:6px">
+              <button class="btn btn-t btn-sm" onclick="wizLoadState()">Load Current</button>
+              <button class="btn btn-f btn-sm" onclick="wizParseState()">Auto-Parse</button>
+              <button class="btn btn-sm btn-danger" onclick="wizClearState()">Clear</button>
+            </div>
+          </div>
+        </div>
+        <div class="wiz-page" data-step="3">
+          <p class="wiz-desc">Review and launch</p>
+          <div class="wiz-review" id="wiz-review"></div>
+        </div>
       </div>
-      <div class="form-row">
-        <div class="form-group"><label class="form-label">Grid Step</label><input class="form-input" id="w-GRID_STEP" value="160" type="number"></div>
-        <div class="form-group"><label class="form-label">World Path</label><input class="form-input" id="w-WORLD_PATH" value="./mc-data/world"></div>
-      </div>
-      <div class="form-group"><label class="form-label">Follow Player (optional)</label><input class="form-input" id="w-FOLLOW_PLAYER" placeholder="Player name to follow"></div>
       <div class="modal-actions">
         <button class="btn btn-o" onclick="closeWizard()">Cancel</button>
-        <button class="btn btn-p" onclick="saveWizard()">Save &amp; Launch</button>
+        <button class="btn btn-t" id="wiz-prev" style="display:none" onclick="wizPrev()">Back</button>
+        <button class="btn btn-f" id="wiz-next" onclick="wizNext()">Next</button>
+        <button class="btn btn-f" id="wiz-launch" style="display:none;background:var(--green)" onclick="wizLaunch()">Launch</button>
       </div>
     </div>
   </div>
 
-  <!-- Main UI -->
+  <!-- State Manager Modal -->
+  <div class="modal-overlay" id="state-modal">
+    <div class="modal"><div class="modal-inner">
+      <h2 style="font-size:1rem;font-weight:500;margin-bottom:6px">State Manager</h2>
+      <p style="font-size:.75rem;color:var(--text2);margin-bottom:10px">View, edit, or create visited state files</p>
+      <div id="state-files"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+        <button class="btn btn-o" onclick="closeState()">Close</button>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- Dashboard -->
   <div class="topbar">
-    <div>
-      <h1>&#127760; World Visitor Bot</h1>
-      <span style="font-size:.72rem;color:var(--text3)" id="clock"></span>
+    <div class="topbar-brand">
+      <div class="topbar-logo">&#127760;</div>
+      <div><h1>World Visitor Bot</h1><div class="topbar-sub" id="clock"></div></div>
     </div>
     <div class="topbar-actions">
-      <button class="btn btn-p" onclick="openWizard()">&#9881; Setup</button>
-      <button class="btn btn-g" onclick="act('start-all')">&#9654; Start</button>
-      <button class="btn btn-r" onclick="confirmAction('stop-all','Stop all services?')">&#9632; Stop</button>
-      <button class="btn btn-y" onclick="confirmAction('prune','Prune &amp; rebuild all containers?')">&#8635; Prune</button>
+      <button class="btn btn-f" onclick="openWizard()">Setup</button>
+      <button class="btn btn-t" onclick="openState()">States</button>
+      <button class="btn btn-f" style="background:var(--green)" onclick="act('start-all')">Start</button>
+      <button class="btn btn-o btn-danger" onclick="confirmAction('stop-all','Stop all services? MC server and bots will shut down.')">Stop</button>
+      <button class="btn btn-o btn-danger" onclick="confirmAction('prune','Prune all containers and rebuild? This will remove containers and rebuild the bot image.')">Prune</button>
     </div>
   </div>
 
-  <!-- Service status cards -->
-  <div class="grid3" id="cards"></div>
+  <div class="grid2">
+    <div class="card conn-card" id="conn-card">
+      <div class="conn-label">Server Address</div>
+      <div class="conn-addr" id="conn-addr">--</div>
+      <div style="font-size:.68rem;color:var(--text3)" id="conn-status">Server offline</div>
+    </div>
+    <div class="card">
+      <div class="card-hd"><span class="card-ttl">Console</span></div>
+      <div class="cmd-box">
+        <input class="cmd-input" id="cmd-input" placeholder="/help or any server command..." onkeydown="if(event.key==='Enter')sendCmd()">
+        <button class="btn btn-f btn-sm" onclick="sendCmd()">Send</button>
+      </div>
+      <div style="font-size:.6rem;color:var(--text3);margin-top:6px" id="cmd-result">Type a command and press Enter</div>
+    </div>
+  </div>
 
-  <!-- Stats cards -->
+  <div class="grid3" id="cards"></div>
   <div class="grid3" id="stats-cards"></div>
 
-  <!-- Progress -->
-  <div class="card progress-card anim-in" id="prog-card" style="display:none">
-    <div class="progress-header"><h2>&#128200; Visit Progress</h2><span id="prog-pct">0%</span></div>
+  <div class="card progress-card" id="prog-card" style="display:none">
+    <div class="progress-top"><h2>Visit Progress</h2><span class="progress-pct" id="prog-pct">0%</span></div>
     <div class="bar"><div class="bar-fill" id="prog-bar" style="width:0%"></div></div>
     <div class="progress-meta"><span id="prog-regions">0/0 regions</span><span id="prog-pos"></span></div>
   </div>
 
-  <!-- Controls & MC Logs tabs -->
   <div class="tabs">
-    <button class="tab active" onclick="switchTab('controls')">&#9881; Control Log</button>
-    <button class="tab" onclick="switchTab('mc')">&#128295; MC Server Log</button>
+    <button class="tab active" onclick="switchTab('controls')">Control Log</button>
+    <button class="tab" onclick="switchTab('mc')">MC Server Log</button>
+    <button class="tab" onclick="switchTab('bluemap')">BlueMap Log</button>
   </div>
-  <div class="log-box" id="log-box" style="height:260px">Connecting...</div>
-  <div class="log-box" id="mc-log-box" style="height:260px;display:none">Waiting for MC server logs...</div>
+  <div class="log-box" id="log-box" style="height:270px">Connecting...</div>
+  <div class="log-box" id="mc-log-box" style="height:270px;display:none">Waiting for MC server logs...</div>
+  <div class="log-box" id="bm-log-box" style="height:270px;display:none">Waiting for BlueMap logs...</div>
 </div>
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
 const $=id=>document.getElementById(id);
 const sio=io();
-let confirmCb=null;
-let lastLog=null;
+let confirmCb=null, wizStep=0, wizFollow=[], wizBotNames=[], wizBotMem=[];
 
 function act(cmd){sio.emit('action',cmd)}
-
 function confirmAction(cmd,msg){
-  $('confirm-title').textContent='Confirm';
-  $('confirm-body').textContent=msg;
-  confirmCb=()=>act(cmd);
-  $('confirm-modal').classList.add('open');
+  $('confirm-title').textContent='Confirm'; $('confirm-body').textContent=msg;
+  confirmCb=()=>act(cmd); $('confirm-modal').classList.add('open');
 }
 function closeConfirm(){$('confirm-modal').classList.remove('open');confirmCb=null}
 $('confirm-ok').onclick=()=>{if(confirmCb)confirmCb();closeConfirm()};
 $('confirm-modal').onclick=e=>{if(e.target===$('confirm-modal'))closeConfirm()}
 
-function openWizard(){
-  fetch('/api/env').then(r=>r.json()).then(cfg=>{
-    $('w-MC_HOST').value=cfg.MC_HOST||'mc';
-    $('w-MC_PORT').value=cfg.MC_PORT||'25565';
-    $('w-MC_USERNAME').value=cfg.MC_USERNAME||'Bot';
-    $('w-BOT_COUNT').value=cfg.BOT_COUNT||'1';
-    $('w-RENDER_DISTANCE').value=cfg.RENDER_DISTANCE||'28';
-    $('w-FLY_Y').value=cfg.FLY_Y||'200';
-    $('w-GRID_STEP').value=cfg.GRID_STEP||'160';
-    $('w-WORLD_PATH').value=cfg.WORLD_PATH||'./mc-data/world';
-    $('w-FOLLOW_PLAYER').value=cfg.FOLLOW_PLAYER||'';
-  }).catch(()=>{});
-  $('wizard-modal').classList.add('open');
+function sendCmd(){
+  const inp=$('cmd-input'); const cmd=inp.value.trim();
+  if(!cmd)return; inp.value=''; $('cmd-result').textContent='Running: '+cmd+' ...';
+  sio.emit('action','cmd:'+cmd);
 }
-function closeWizard(){$('wizard-modal').classList.remove('open')}
-$('wizard-modal').onclick=e=>{if(e.target===$('wizard-modal'))closeWizard()}
+sio.on('cmd-result',d=>{ $('cmd-result').textContent=d; });
 
-function saveWizard(){
-  const settings={
-    MC_HOST:$('w-MC_HOST').value,MC_PORT:$('w-MC_PORT').value,
-    MC_USERNAME:$('w-MC_USERNAME').value,BOT_COUNT:$('w-BOT_COUNT').value,
-    RENDER_DISTANCE:$('w-RENDER_DISTANCE').value,FLY_Y:$('w-FLY_Y').value,
-    GRID_STEP:$('w-GRID_STEP').value,WORLD_PATH:$('w-WORLD_PATH').value,
-    FOLLOW_PLAYER:$('w-FOLLOW_PLAYER').value
-  };
-  fetch('/api/wizard',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(settings)})
-    .then(()=>{closeWizard();act('start-all')});
-}
-
-function switchTab(tab){
+function switchTab(t){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-  if(tab==='controls'){$('log-box').style.display='';$('mc-log-box').style.display='none';event.target.classList.add('active')}
-  else{$('log-box').style.display='none';$('mc-log-box').style.display='';event.target.classList.add('active')}
-  document.querySelectorAll('.tab')[tab==='controls'?0:1].classList.add('active');
+  $('log-box').style.display='none'; $('mc-log-box').style.display='none'; $('bm-log-box').style.display='none';
+  if(t==='controls'){$('log-box').style.display='';document.querySelectorAll('.tab')[0].classList.add('active')}
+  else if(t==='mc'){$('mc-log-box').style.display='';document.querySelectorAll('.tab')[1].classList.add('active')}
+  else{$('bm-log-box').style.display='';document.querySelectorAll('.tab')[2].classList.add('active')}
 }
 
-// Log rendering
-function renderLog(el,data,key){
-  if(!el._lines)el._lines=[];
-  const t=new Date(data.time).toLocaleTimeString();
-  el._lines.push(`<span class="t">${t}</span> <span class="${data.level||'m'}">${he(data.msg)}</span>`);
-  if(el._lines.length>300)el._lines=el._lines.slice(-300);
-  el.innerHTML=el._lines.join('\n');
-  el.scrollTop=el.scrollHeight;
+function renderLog(el,data){
+  if(!el._l)el._l=[];
+  const t=new Date().toLocaleTimeString();
+  el._l.push('<span class="t">'+t+'</span> <span class="'+(data.level||'m')+'">'+he(data.msg)+'</span>');
+  if(el._l.length>400)el._l=el._l.slice(-400);
+  el.innerHTML=el._l.join('\n'); el.scrollTop=el.scrollHeight;
 }
 function he(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 
-sio.on('log',d=>renderLog($('log-box'),d,'log'));
-sio.on('mclog',d=>renderLog($('mc-log-box'),d,'mc'));
+sio.on('log',d=>renderLog($('log-box'),d));
+sio.on('mclog',d=>renderLog($('mc-log-box'),d));
+sio.on('bmlog',d=>renderLog($('bm-log-box'),d));
 
 function renderStats(stats){
-  if(!stats||!Object.keys(stats).length){
-    $('stats-cards').innerHTML='';return;
-  }
+  if(!stats||!Object.keys(stats).length){$('stats-cards').innerHTML='';return}
   let h='';
   for(const [name,s] of Object.entries(stats)){
     const label=name==='mc'?'MC Server':name==='visitor'?'Visitor':'BlueMap';
-    const icon=name==='mc'?'&#128421;':name==='visitor'?'&#129302;':'&#128506;';
-    h+=`<div class="card">
-      <div class="card-header"><span class="card-title">${icon} ${label}</span></div>
-      <div class="stat-row"><span class="stat-label">CPU</span><span class="stat-val">${s.cpu.trim()}</span></div>
-      <div class="stat-row"><span class="stat-label">Memory</span><span class="stat-val">${s.mem.trim()}</span></div>
-      <div class="stat-row"><span class="stat-label">Network</span><span class="stat-val">${s.net.trim()}</span></div>
-    </div>`;
+    h+='<div class="card"><div class="card-hd"><span class="card-ttl">'+label+'</span></div><div class="stat-row"><span class="stat-l">CPU</span><span class="stat-v">'+s.cpu.trim()+'</span></div><div class="stat-row"><span class="stat-l">Memory</span><span class="stat-v">'+s.mem.trim()+'</span></div><div class="stat-row"><span class="stat-l">Network</span><span class="stat-v">'+s.net.trim()+'</span></div></div>';
   }
   $('stats-cards').innerHTML=h;
 }
 
+function setTheme(s){
+  document.body.className='';
+  const mc=s.mc||'stopped', visitor=s.visitor||'stopped';
+  const hasError=s._hasError||false;
+  if(hasError) document.body.classList.add('error');
+  else if(mc==='running'||visitor==='running') document.body.classList.add('running');
+  else document.body.classList.add('idle');
+}
+
 function render(s){
+  setTheme(s);
   const svcs=[
     {k:'mc',l:'MC Server',icon:'&#128421;'},
     {k:'visitor',l:'Visitor Bot',icon:'&#129302;'},
@@ -290,34 +361,172 @@ function render(s){
   let h='';
   for(const sv of svcs){
     const st=s[sv.k]||'stopped';
-    h+=`<div class="card">
-      <div class="card-header"><span class="dot ${st}"></span><span class="card-title">${sv.icon} ${sv.l}</span></div>
-      <div class="card-sub" style="text-transform:uppercase">${st}</div>
-      <div style="display:flex;gap:6px;margin-top:10px">
-        <button class="btn btn-g btn-sm" onclick="act('start-${sv.k}')">Start</button>
-        <button class="btn btn-r btn-sm" onclick="act('stop-${sv.k}')">Stop</button>
-      </div></div>`;
+    h+='<div class="card"><div class="card-hd"><span class="dot '+st+'"></span><span class="card-ttl">'+sv.icon+' '+sv.l+'</span></div><div class="card-sub">'+st.toUpperCase()+'</div><div style="display:flex;gap:4px;margin-top:8px"><button class="btn btn-o btn-sm" style="color:var(--green);border-color:var(--green)44" onclick="act(\'start-'+sv.k+'\')">Start</button><button class="btn btn-o btn-sm" style="color:var(--red);border-color:var(--red)44" onclick="act(\'stop-'+sv.k+'\')">Stop</button></div></div>';
   }
   $('cards').innerHTML=h;
 
   const p=s.progress||{};
-  if(!p.total){$('prog-card').style.display='none'}
+  if(!p.total) $('prog-card').style.display='none';
   else{
     $('prog-card').style.display='';
     const pct=Math.round(p.regions/p.total*100)||0;
-    $('prog-bar').style.width=pct+'%';
-    $('prog-bar').textContent=pct+'%';
+    $('prog-bar').style.width=pct+'%'; $('prog-bar').textContent=pct+'%';
     $('prog-pct').textContent=pct+'%';
-    $('prog-regions').textContent=`${p.regions}/${p.total} regions`;
-    $('prog-pos').textContent=p.rx||p.rz?`r.${p.rx},${p.rz}`:'';
+    $('prog-regions').textContent=p.regions+'/'+p.total+' regions';
+    $('prog-pos').textContent=p.rx||p.rz?'r.'+p.rx+','+p.rz:'';
   }
 
   if(s.stats)renderStats(s.stats);
+
+  if(s.conn){
+    $('conn-addr').textContent=s.conn.host+':'+s.conn.port;
+    const mcRunning=s.mc==='running';
+    $('conn-card').className='card conn-card'+(mcRunning?' running':'');
+    $('conn-status').textContent=mcRunning?'Server online — connect now':'Server offline';
+  }
 }
 
 sio.on('status',render);
-sio.on('connect',()=>renderLog($('log-box'),{msg:'Connected',level:'d',time:new Date().toISOString()},'log'));
-sio.on('disconnect',()=>renderLog($('log-box'),{msg:'Disconnected',level:'e',time:new Date().toISOString()},'log'));
+sio.on('connect',()=>renderLog($('log-box'),{msg:'Connected',level:'d'}));
+sio.on('disconnect',()=>renderLog($('log-box'),{msg:'Disconnected',level:'e'}));
+
+// Wizard
+function openWizard(){
+  fetch('/api/env').then(r=>r.json()).then(cfg=>{
+    $('wiz-MC_USERNAME').value=cfg.MC_USERNAME||'Bot';
+    $('wiz-BOT_COUNT').value=cfg.BOT_COUNT||'1';
+    $('wiz-MC_MEMORY').value=cfg.MC_MEMORY||'12G';
+    $('wiz-BOT_MEMORY').value=cfg.BOT_MEMORY||'2G';
+    $('wiz-RENDER_DISTANCE').value=cfg.RENDER_DISTANCE||'28';
+    $('wiz-FLY_Y').value=cfg.FLY_Y||'200';
+    $('wiz-GRID_STEP').value=cfg.GRID_STEP||'160';
+    $('wiz-WORLD_PATH').value=cfg.WORLD_PATH||'./mc-data/world';
+    wizFollow=(cfg.FOLLOW_PLAYER||'').split(',').filter(Boolean);
+    wizRenderFollow();
+    wizUpdateBotCount();
+  }).catch(()=>{});
+  wizStep=0; wizGo(0);
+  $('wizard-modal').classList.add('open');
+}
+function closeWizard(){$('wizard-modal').classList.remove('open')}
+$('wizard-modal').onclick=e=>{if(e.target===$('wizard-modal'))closeWizard()}
+
+function wizUpdateBotCount(){
+  const n=parseInt($('wiz-BOT_COUNT').value)||1;
+  if(n<1)n=1; if(n>4)n=4;
+  $('wiz-BOT_COUNT').value=n;
+  if(n<=1){$('wiz-bot-tabs').style.display='none';return}
+  $('wiz-bot-tabs').style.display='';
+  let h='<div class="form-row">';
+  for(let i=0;i<n;i++){
+    if(!wizBotNames[i])wizBotNames[i]='Bot'+i;
+    if(!wizBotMem[i])wizBotMem[i]=$('wiz-BOT_MEMORY').value||'2G';
+    h+='<div class="form-group"><label class="form-label">Bot '+i+' Name</label><input class="form-input" id="wiz-bot-name-'+i+'" value="'+wizBotNames[i]+'" onchange="wizBotNames['+i+']=this.value"></div>';
+  }
+  h+='</div><div class="form-row">';
+  for(let i=0;i<n;i++){
+    h+='<div class="form-group"><label class="form-label">Bot '+i+' RAM</label><input class="form-input" id="wiz-bot-mem-'+i+'" value="'+wizBotMem[i]+'" onchange="wizBotMem['+i+']=this.value"></div>';
+  }
+  h+='</div>';
+  $('wiz-bot-fields').innerHTML=h;
+}
+
+function wizAddFollow(){
+  const v=$('wiz-follow-input').value.trim();
+  if(v&&!wizFollow.includes(v)){wizFollow.push(v);wizRenderFollow()}
+  $('wiz-follow-input').value='';
+}
+function wizRemoveFollow(name){wizFollow=wizFollow.filter(f=>f!==name);wizRenderFollow()}
+function wizRenderFollow(){
+  $('wiz-follow-tags').innerHTML=wizFollow.map(f=>'<span class="tag">'+he(f)+'<button class="tag-remove" onclick="wizRemoveFollow(\''+he(f)+'\')">&times;</button></span>').join('');
+}
+
+function wizLoadState(){
+  fetch('/api/states').then(r=>r.json()).then(data=>{
+    $('wiz-state-json').value=JSON.stringify(data,null,2);
+  }).catch(()=>$('wiz-state-json').value='{}');
+}
+function wizParseState(){
+  try{
+    const d=JSON.parse($('wiz-state-json').value);
+    $('wiz-state-json').value=JSON.stringify(d,null,2);
+  }catch(e){$('wiz-state-json').value='Parse error: '+e.message}
+}
+function wizClearState(){$('wiz-state-json').value='{}'}
+
+function wizGo(n){
+  const pages=document.querySelectorAll('.wiz-page');
+  pages.forEach(p=>p.classList.remove('active'));
+  pages[n].classList.add('active');
+  const steps=document.querySelectorAll('.wiz-step');
+  steps.forEach((s,i)=>{
+    s.classList.remove('active','done');
+    if(i<n)s.classList.add('done'); else if(i===n)s.classList.add('active');
+  });
+  document.querySelectorAll('.wiz-line').forEach((l,i)=>{l.classList.toggle('done',i<n)});
+
+  $('wiz-back').style.visibility=n===0?'hidden':'';
+  $('wiz-prev').style.display=n===0?'none':'';
+  $('wiz-next').style.display=n===3?'none':'';
+  $('wiz-launch').style.display=n===3?'':'none';
+
+  if(n===3)wizBuildReview();
+}
+function wizNext(){if(wizStep<3){wizStep++;wizGo(wizStep)}}
+function wizPrev(){if(wizStep>0){wizStep--;wizGo(wizStep)}}
+
+function wizBuildReview(){
+  const rows=[
+    ['Username',$('wiz-MC_USERNAME').value],
+    ['Bot Count',$('wiz-BOT_COUNT').value],
+    ['Server RAM',$('wiz-MC_MEMORY').value],
+    ['Bot RAM',$('wiz-BOT_MEMORY').value],
+    ['Render Distance',$('wiz-RENDER_DISTANCE').value+' chunks'],
+    ['Flight Y',$('wiz-FLY_Y').value],
+    ['Grid Step',$('wiz-GRID_STEP').value+' blocks'],
+    ['World Path',$('wiz-WORLD_PATH').value],
+    ['Follow Players',wizFollow.length?wizFollow.join(', '):'None'],
+  ];
+  $('wiz-review').innerHTML=rows.map(r=>'<div class="wiz-review-row"><span class="wiz-review-l">'+r[0]+'</span><span class="wiz-review-v">'+r[1]+'</span></div>').join('');
+}
+
+function wizLaunch(){
+  const settings={
+    MC_USERNAME:$('wiz-MC_USERNAME').value,BOT_COUNT:$('wiz-BOT_COUNT').value,
+    MC_MEMORY:$('wiz-MC_MEMORY').value,BOT_MEMORY:$('wiz-BOT_MEMORY').value,
+    RENDER_DISTANCE:$('wiz-RENDER_DISTANCE').value,FLY_Y:$('wiz-FLY_Y').value,
+    GRID_STEP:$('wiz-GRID_STEP').value,WORLD_PATH:$('wiz-WORLD_PATH').value,
+    FOLLOW_PLAYER:wizFollow.join(',')
+  };
+  const stateJson=$('wiz-state-json').value.trim();
+  if(stateJson&&stateJson!=='{}'){
+    try{settings.stateData=JSON.parse(stateJson)}catch(e){}
+  }
+  fetch('/api/wizard',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(settings)})
+    .then(r=>r.json()).then(d=>{
+      if(d.ok){closeWizard();act('start-all')}
+      else renderLog($('log-box'),{msg:'Save failed: '+(d.error||'unknown'),level:'e'});
+    });
+}
+
+// State manager
+function openState(){
+  fetch('/api/states').then(r=>r.json()).then(data=>{
+    let h='<div style="max-height:400px;overflow-y:auto">';
+    if(!data||!Object.keys(data).length)h+='<p style="font-size:.75rem;color:var(--text3)">No state files found.</p>';
+    else{
+      for(const [k,v] of Object.entries(data)){
+        const count=v&&v.visited?Object.keys(v.visited).length:0;
+        h+='<div class="stat-row"><span class="stat-l">'+he(k)+'</span><span class="stat-v">'+count+' visited</span></div>';
+      }
+    }
+    h+='</div>';
+    $('state-files').innerHTML=h;
+    $('state-modal').classList.add('open');
+  });
+}
+function closeState(){$('state-modal').classList.remove('open')}
+$('state-modal').onclick=e=>{if(e.target===$('state-modal'))closeState()}
 
 setInterval(()=>{$('clock').textContent=new Date().toLocaleString()},1000);
 </script>
