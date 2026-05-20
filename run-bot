@@ -67,7 +67,10 @@ BOT_COUNT=4
 WORLD_PATH=./mc-data/world
 WP_DELAY=2000
 REGION_DELAY=2000
-CHUNK_LOAD_TIMEOUT=300000
+CHUNK_LOAD_TIMEOUT=30000
+BLUEMAP_HOST=bluemap
+BLUEMAP_PORT=8100
+BLUEMAP_MAP=overworld
 EOF
 fi
 
@@ -75,7 +78,7 @@ fi
 export BOT_COUNT
 source .env
 export MC_USERNAME WORLD_PATH FLY_Y GRID_STEP RENDER_DISTANCE WP_DELAY
-export CHUNK_LOAD_TIMEOUT
+export CHUNK_LOAD_TIMEOUT BLUEMAP_HOST BLUEMAP_PORT BLUEMAP_MAP
 
 echo "  Bots:        ${BOT_COUNT}"
 echo "  Username:    ${MC_USERNAME}"
@@ -106,6 +109,12 @@ if [ -n "$INTERACTIVE" ]; then
   GRID_STEP="${input:-$GRID_STEP}"
   read -r -p "Render distance (chunks) [${RENDER_DISTANCE}]: " input
   RENDER_DISTANCE="${input:-$RENDER_DISTANCE}"
+  read -r -p "BlueMap host [${BLUEMAP_HOST:-bluemap}]: " input
+  BLUEMAP_HOST="${input:-${BLUEMAP_HOST:-bluemap}}"
+  read -r -p "BlueMap port [${BLUEMAP_PORT:-8100}]: " input
+  BLUEMAP_PORT="${input:-${BLUEMAP_PORT:-8100}}"
+  read -r -p "BlueMap map [${BLUEMAP_MAP:-overworld}]: " input
+  BLUEMAP_MAP="${input:-${BLUEMAP_MAP:-overworld}}"
   echo ""
 
   # Save to .env for future runs
@@ -122,6 +131,9 @@ WORLD_PATH=${WORLD_PATH}
 WP_DELAY=${WP_DELAY:-2000}
 REGION_DELAY=${REGION_DELAY:-2000}
 CHUNK_LOAD_TIMEOUT=${CHUNK_LOAD_TIMEOUT:-300000}
+BLUEMAP_HOST=${BLUEMAP_HOST}
+BLUEMAP_PORT=${BLUEMAP_PORT}
+BLUEMAP_MAP=${BLUEMAP_MAP}
 EOF
 
   echo "--- Launching with ---"
@@ -143,13 +155,13 @@ fi
 
 # ----- Launch -----
 if [ -n "$DETACH" ]; then
-  echo "[...] Starting Minecraft server + ${BOT_COUNT} bot(s) in background..."
+  echo "[...] Starting Minecraft server + ${BOT_COUNT} bot(s) + BlueMap..."
   echo "      Use 'docker compose logs -f' to follow output."
   echo "      Use 'docker compose stop' to stop."
   echo ""
   UP_FLAGS="-d"
 else
-  echo "[...] Starting Minecraft server + ${BOT_COUNT} bot(s)..."
+  echo "[...] Starting Minecraft server + ${BOT_COUNT} bot(s) + BlueMap..."
   echo "     Press Ctrl+C to stop."
   echo ""
   UP_FLAGS="--abort-on-container-exit"
@@ -157,15 +169,15 @@ fi
 
 case "$BOT_COUNT" in
   1)
-    exec docker compose up $UP_FLAGS mc visitor
+    exec docker compose up $UP_FLAGS mc visitor bluemap
     ;;
   2)
-    exec docker compose --profile multi up $UP_FLAGS mc visitor visitor1
+    exec docker compose --profile multi up $UP_FLAGS mc visitor visitor1 bluemap
     ;;
   3)
-    exec docker compose --profile multi up $UP_FLAGS mc visitor visitor1 visitor2
+    exec docker compose --profile multi up $UP_FLAGS mc visitor visitor1 visitor2 bluemap
     ;;
   4)
-    exec docker compose --profile multi up $UP_FLAGS mc visitor visitor1 visitor2 visitor3
+    exec docker compose --profile multi up $UP_FLAGS mc visitor visitor1 visitor2 visitor3 bluemap
     ;;
 esac

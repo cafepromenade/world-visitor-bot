@@ -1,0 +1,14 @@
+services:
+  control:
+    build: ./control
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '3000:3000'
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/app/project
+    environment:
+      - PROJECT_HOST_DIR=${PWD:-/home/docker/world-visitor-bot}
+      - PORT=80
+      - PORT2=3000

@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>World Visitor Bot</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background:#0b1120;color:#e2e8f0;min-height:100vh}
+.container{max-width:760px;margin:0 auto;padding:12px}
+header{text-align:center;padding:20px 0 8px}
+header h1{font-size:1.4rem;font-weight:700;letter-spacing:-0.02em}
+header p{font-size:0.75rem;color:#64748b;margin-top:2px}
+.toolbar{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin:10px 0 14px}
+.btn{padding:7px 16px;border:none;border-radius:10px;font-size:0.78rem;font-weight:600;cursor:pointer;transition:all .12s;display:inline-flex;align-items:center;gap:5px}
+.btn:active{transform:scale(.95)}
+.btn-go{background:#22c55e;color:#fff}
+.btn-stop{background:#ef4444;color:#fff}
+.btn-warn{background:#ea580c;color:#fff}
+.btn-gray{background:#334155;color:#cbd5e1}
+.btn-blue{background:#1d4ed8;color:#fff}
+.btn:disabled{opacity:.35;pointer-events:none}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:0 0 12px}
+.card{background:#111827;border-radius:14px;padding:14px;border:1px solid #1e293b}
+.card-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.dot{width:9px;height:9px;border-radius:9999px;flex-shrink:0}
+.dot.running{background:#22c55e;box-shadow:0 0 10px #22c55e55}
+.dot.stopped{background:#ef4444;box-shadow:0 0 6px #ef444444}
+.dot.starting{background:#eab308;box-shadow:0 0 10px #eab30855;animation:pulse 1.2s infinite}
+.dot.unknown{background:#475569}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.card-title{font-size:.85rem;font-weight:600}
+.card-sub{font-size:.68rem;color:#64748b;text-transform:uppercase}
+.card-actions{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.card-actions .btn{padding:5px 12px;font-size:.7rem}
+.progress{background:#111827;border-radius:14px;padding:14px;border:1px solid #1e293b;margin-bottom:12px}
+.progress h2{font-size:.88rem;font-weight:600;color:#94a3b8;margin-bottom:10px}
+.bar{height:24px;background:#1e293b;border-radius:12px;overflow:hidden;margin-bottom:8px}
+.bar-fill{height:100%;background:linear-gradient(90deg,#2563eb,#7c3aed);border-radius:12px;transition:width .5s ease;min-width:0;display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:700;color:#fff}
+.info-row{display:flex;justify-content:space-between;font-size:.7rem;color:#64748b}
+.info-detail{font-size:.68rem;color:#475569;margin-top:4px}
+.logs{background:#0f172a;border-radius:14px;padding:14px;border:1px solid #1e293b}
+.logs h2{font-size:.88rem;font-weight:600;color:#94a3b8;margin-bottom:10px}
+.log-box{background:#020617;border-radius:10px;padding:10px;font-family:'SF Mono','Fira Code','Cascadia Code',monospace;font-size:.68rem;line-height:1.55;color:#94a3b8;max-height:300px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
+.log-box .t{color:#eab308}
+.log-box .w{color:#facc15}
+.log-box .e{color:#ef4444}
+.log-box .i{color:#3b82f6}
+.log-box .d{color:#22c55e}
+@media(max-width:480px){
+  .container{padding:8px}
+  .cards{grid-template-columns:1fr}
+  header h1{font-size:1.2rem}
+}
+</style>
+</head>
+<body>
+<div class="container">
+<header>
+  <h1>&#127760; World Visitor Bot</h1>
+  <p id="clock"></p>
+</header>
+
+<div class="toolbar">
+  <button class="btn btn-go" onclick="act('start-all')">&#9654; Start All</button>
+  <button class="btn btn-stop" onclick="act('stop-all')">&#9632; Stop All</button>
+  <button class="btn btn-blue" onclick="act('start-visitor')">&#9654; Bot</button>
+  <button class="btn btn-stop" onclick="act('stop-visitor')">&#9632; Bot</button>
+  <button class="btn btn-blue" onclick="act('start-bluemap')">&#9654; Map</button>
+  <button class="btn btn-stop" onclick="act('stop-bluemap')">&#9632; Map</button>
+  <button class="btn btn-warn" onclick="act('prune')">&#8635; Prune</button>
+  <a class="btn btn-gray" href="http://localhost:8100" target="_blank" rel="noopener" style="text-decoration:none">&#128506; BlueMap</a>
+</div>
+
+<div class="cards" id="cards"></div>
+
+<div class="progress" id="prog" style="display:none">
+  <h2>&#128200; Progress</h2>
+  <div class="bar"><div class="bar-fill" id="bar" style="width:0%">0%</div></div>
+  <div class="info-row"><span id="p1"></span><span id="p2"></span></div>
+  <div class="info-detail" id="p3"></div>
+</div>
+
+<div class="logs">
+  <h2>&#128220; Live Logs</h2>
+  <div class="log-box" id="logbox">Connecting...</div>
+</div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const logEl=$('logbox');
+let lines=[];
+
+function add(msg,cls){
+  const t=new Date().toLocaleTimeString();
+  lines.push(`<span class="t">${t}</span> <span class="${cls||''}">${he(msg)}</span>`);
+  if(lines.length>200)lines.shift();
+  logEl.innerHTML=lines.join('\n');
+  logEl.scrollTop=logEl.scrollHeight;
+}
+function he(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+
+const sio=io();
+sio.on('connect',()=>add('Connected','d'));
+sio.on('disconnect',()=>add('Disconnected','e'));
+sio.on('log',d=>add(d.msg,{info:'i',warn:'w',error:'e',done:'d'}[d.level]||''));
+sio.on('status',render);
+
+function render(s){
+  const svcs=[
+    {k:'mc',l:'MC Server'},
+    {k:'visitor',l:'Visitor Bot'},
+    {k:'bluemap',l:'BlueMap'}
+  ];
+  let h='';
+  for(const sv of svcs){
+    const st=s[sv.k]||'unknown';
+    h+=`<div class="card">
+      <div class="card-head"><span class="dot ${st}"></span><span class="card-title">${sv.l}</span></div>
+      <div class="card-sub">${st}</div>
+      <div class="card-actions">
+        <button class="btn btn-go" onclick="act('start-${sv.k}')">Start</button>
+        <button class="btn btn-stop" onclick="act('stop-${sv.k}')">Stop</button>
+      </div></div>`;
+  }
+  $('cards').innerHTML=h;
+
+  const p=s.progress||{};
+  if(!p.total){$('prog').style.display='none';return}
+  $('prog').style.display='block';
+  const pct=Math.round(p.regions/p.total*100)||0;
+  $('bar').style.width=pct+'%';
+  $('bar').textContent=pct+'%';
+  $('p1').textContent=`Regions: ${p.regions}/${p.total}`;
+  $('p2').textContent=pct+'%';
+  $('p3').textContent=p.detail||`Current: r.${p.rx},${p.rz}`;
+}
+
+function act(cmd){add('[cmd] '+cmd,'i');sio.emit('action',cmd)}
+
+setInterval(()=>{$('clock').textContent=new Date().toLocaleString()},1000);
+</script>
+</body>
+</html>

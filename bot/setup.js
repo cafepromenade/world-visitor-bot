@@ -16,6 +16,9 @@ async function main() {
   const rd = await prompt(`Render distance in chunks [32]: `) || '32';
   const y = await prompt(`Flight altitude Y [120]: `) || '120';
   const step = await prompt(`Grid step size in blocks - smaller = more thorough, larger = faster [80]: `) || '80';
+  const bmHost = await prompt(`BlueMap host [localhost]: `) || 'localhost';
+  const bmPort = await prompt(`BlueMap port [8100]: `) || '8100';
+  const bmMap = await prompt(`BlueMap map name [overworld]: `) || 'overworld';
 
   const envContent = [
     `# Overworld Visitor configuration`,
@@ -26,6 +29,9 @@ async function main() {
     `RENDER_DISTANCE=${rd}`,
     `FLY_Y=${y}`,
     `GRID_STEP=${step}`,
+    `BLUEMAP_HOST=${bmHost}`,
+    `BLUEMAP_PORT=${bmPort}`,
+    `BLUEMAP_MAP=${bmMap}`,
     ''
   ].join('\n');
 
@@ -34,8 +40,10 @@ async function main() {
   console.log(`\nConfig written to .env`);
 
   console.log('\nRun with:');
-  console.log('  docker compose run --rm visitor          (all regions)');
-  console.log('  docker compose -f compose.new.yml run --rm visitor-new  (new regions only)');
+  console.log('  ./visit-bluemap.sh [bot-count]         (live BlueMap + CLI final render)');
+  console.log('  ./run-bot [bot-count]                  (Minecraft + bots + BlueMap)');
+  console.log('  ./visit.sh                             (all regions)');
+  console.log('  ./visit-new.sh                         (new regions only)');
 
   rl.close();
 }
