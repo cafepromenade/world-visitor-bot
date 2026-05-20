@@ -56,6 +56,7 @@ let bugWatcherState = { queue: [], reports: [], completed: [], current: null, la
 let bugWatcherRunning = false;
 let bugAutoMergeRunning = false;
 let bugWatcherWritable = true;
+let activeBugWatcherChild = null;
 
 function getLocalIP() {
   const provided = process.env.HOST_IP;
@@ -184,8 +185,15 @@ function spawnLogged(command, args, options = {}) {
   const logFile = options.logFile;
   if (logFile) appendSession(logFile, `\n$ ${[command, ...args].map(shQuote).join(' ')}\n`);
   return new Promise(resolve => {
-    const child = spawn(command, args, { cwd: options.cwd || PROJECT_DIR, env: options.env || process.env, shell: false });
+    const child = spawn(command, args, { cwd: options.cwd || PROJECT_DIR, env: options.env || process.env, shell: false, detached: true });
+    if (options.onChild) options.onChild(child);
     let output = '';
+    let timedOut = false;
+    let killTimer = null;
+    const killChild = signal => {
+      try { process.kill(-child.pid, signal); }
+      catch { try { child.kill(signal); } catch {} }
+    };
     const onData = data => {
       const text = data.toString();
       output += text;
@@ -194,18 +202,26 @@ function spawnLogged(command, args, options = {}) {
     child.stdout.on('data', onData);
     child.stderr.on('data', onData);
     const timer = setTimeout(() => {
+      timedOut = true;
       if (logFile) appendSession(logFile, `\n[timed out after ${options.timeout || OPENCODE_TIMEOUT_MS}ms]\n`);
-      child.kill('SIGTERM');
+      killChild('SIGTERM');
+      killTimer = setTimeout(() => {
+        if (logFile) appendSession(logFile, '\n[timeout] forcing process group stop\n');
+        killChild('SIGKILL');
+      }, 10000);
+      if (killTimer.unref) killTimer.unref();
     }, options.timeout || OPENCODE_TIMEOUT_MS);
     child.on('error', err => {
       clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
       if (logFile) appendSession(logFile, `\n[spawn failed] ${err.message}\n`);
-      resolve({ ok: false, code: 1, stdout: output, stderr: err.message });
+      resolve({ ok: false, code: 1, stdout: output, stderr: err.message, timedOut });
     });
     child.on('close', code => {
       clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
       if (logFile) appendSession(logFile, `\n[exit ${code}]\n`);
-      resolve({ ok: code === 0, code, stdout: output, stderr: '' });
+      resolve({ ok: code === 0, code, stdout: output, stderr: '', timedOut });
     });
   });
 }
@@ -338,6 +354,25 @@ function safeSlug(value, fallback = 'task') {
   return String(value || fallback).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 52) || fallback;
 }
 
+function safeBranchName(value, fallback = 'task') {
+  const parts = String(value || '').split('/').map(part => safeSlug(part, fallback)).filter(Boolean);
+  const branch = (parts.length ? parts : ['autofix', safeSlug(fallback, 'task')]).join('/');
+  return branch.includes('/') ? branch : `autofix/${branch}`;
+}
+
+function normalizeTaskBranch(task) {
+  if (!task) return;
+  const fallback = `${task.title || 'task'}-${hashText(task.signature || task.id || task.title || 'task').slice(0, 10)}`;
+  const next = safeBranchName(task.branch || `autofix/${safeSlug(fallback)}`, fallback);
+  if (task.branch === next) return;
+  const previous = task.branch;
+  task.branch = next;
+  for (const reportId of task.reportIds || []) {
+    const report = bugWatcherState.reports.find(r => r.id === reportId);
+    if (report?.branch === previous) report.branch = next;
+  }
+}
+
 function hashText(value) {
   return crypto.createHash('sha256').update(String(value)).digest('hex');
 }
@@ -350,6 +385,7 @@ function normalizeBugState() {
   bugWatcherState.queue = Array.isArray(bugWatcherState.queue) ? bugWatcherState.queue : [];
   bugWatcherState.reports = Array.isArray(bugWatcherState.reports) ? bugWatcherState.reports : [];
   bugWatcherState.completed = Array.isArray(bugWatcherState.completed) ? bugWatcherState.completed : [];
+  [bugWatcherState.current, ...bugWatcherState.queue, ...bugWatcherState.completed].filter(Boolean).forEach(normalizeTaskBranch);
   if (bugWatcherState.current && ['completed', 'failed'].includes(bugWatcherState.current.status)) {
     bugWatcherState.completed.push(bugWatcherState.current);
     bugWatcherState.current = null;
@@ -381,7 +417,8 @@ function normalizeBugState() {
 
 function retryDueMs(task) {
   if (!task?.nextRetryAt) return 0;
-  return Math.max(0, Date.parse(task.nextRetryAt) - Date.now());
+  const retryAt = Date.parse(task.nextRetryAt);
+  return Number.isFinite(retryAt) ? Math.max(0, retryAt - Date.now()) : 0;
 }
 
 function isBugTaskRunnable(task) {
@@ -477,7 +514,7 @@ function findAnyTaskById(id) {
 }
 
 function taskElapsedMs(task) {
-  const start = Date.parse(task?.startedAt || task?.createdAt || '');
+  const start = Date.parse(task?.startedAt || task?.requeuedAt || task?.createdAt || '');
   if (!start) return 0;
   const end = Date.parse(task.finishedAt || task.mergedAt || (['completed', 'failed'].includes(task.status) ? task.updatedAt : '') || '') || Date.now();
   return Math.max(0, end - start);
@@ -553,6 +590,7 @@ function publicBugTask(task, estimate = {}) {
     mergeTarget: task.mergeTarget || '',
     mergeRejected: Boolean(task.mergeRejected),
     startedAt: task.startedAt || '',
+    requeuedAt: task.requeuedAt || '',
     finishedAt: task.finishedAt || '',
     nextRetryAt: task.nextRetryAt || '',
     retryInMs: retryDueMs(task),
@@ -623,6 +661,7 @@ function getBugWatcherPublicStatus() {
     running: bugWatcherRunning,
     current: publicBugTask(bugWatcherState.current, currentEstimate),
     queue: bugWatcherState.queue.map((task, i) => publicBugTask(task, enrichTaskEstimate(task, i, currentRemaining, avgMs))),
+    failed: bugWatcherState.completed.filter(task => task.status === 'failed').slice(-40).reverse().map(task => publicBugTask(task, enrichTaskEstimate(task, -1, 0, avgMs))),
     completed: bugWatcherState.completed.slice(-20).reverse().map(task => publicBugTask(task, enrichTaskEstimate(task, -1, 0, avgMs))),
     reports: bugWatcherState.reports.slice(-40).reverse().map(report => publicBugReport(report)),
     lastCheckAt: bugWatcherState.lastCheckAt || '',
@@ -645,17 +684,18 @@ function enqueueBugTask(input) {
       existing.reportIds = [...(existing.reportIds || []), input.reportId];
     }
     if (input.branch && !existing.branch) existing.branch = input.branch;
+    normalizeTaskBranch(existing);
     saveBugWatcherState();
     return existing;
   }
-  const short = signature.slice(0, 10);
+  const short = hashText(signature).slice(0, 10);
   const task = {
     id: `${Date.now()}-${short}`,
     source: input.source || 'watcher',
     title,
     severity: input.severity || 'error',
     signature,
-    branch: input.branch || `autofix/${safeSlug(title)}-${short}`,
+    branch: safeBranchName(input.branch || `autofix/${safeSlug(title)}-${short}`, title),
     status: 'queued',
     attempts: 0,
     createdAt: nowIso(),
@@ -1158,18 +1198,26 @@ async function currentGitBranch(dir = PROJECT_DIR) {
 }
 
 async function ensureBugWorktree(task, logFile) {
-  const baseBranch = process.env.BUG_WATCHER_BASE_BRANCH || bugWatcherState.baseBranch || await currentGitBranch(PROJECT_DIR);
+  normalizeTaskBranch(task);
+  const baseBranch = process.env.BUG_WATCHER_BASE_BRANCH || await currentGitBranch(PROJECT_DIR);
   bugWatcherState.baseBranch = baseBranch;
   const worktree = path.join(bugWorktreesDir, safeSlug(task.branch));
   ensureDir(bugWorktreesDir);
-  if (fs.existsSync(path.join(worktree, '.git'))) return { worktree, baseBranch };
+  await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} worktree prune --expire now`, { cwd: PROJECT_DIR, logFile, timeout: 120000 });
+  if (fs.existsSync(path.join(worktree, '.git'))) {
+    const current = await runShell(`git -c safe.directory=${shQuote(worktree)} rev-parse --abbrev-ref HEAD`, { cwd: worktree, timeout: 120000 });
+    if (current.ok && current.stdout.trim() === task.branch) {
+      await runShellLogged(`git -c safe.directory=${shQuote(worktree)} merge --no-edit ${shQuote(baseBranch)}`, { cwd: worktree, logFile, timeout: 300000 });
+      return { worktree, baseBranch };
+    }
+  }
   if (fs.existsSync(worktree)) fs.rmSync(worktree, { recursive: true, force: true });
-  await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} worktree prune`, { cwd: PROJECT_DIR, logFile, timeout: 120000 });
   const branchExists = await runShell(`git -c safe.directory=${shQuote(PROJECT_DIR)} rev-parse --verify ${shQuote(task.branch)} 2>/dev/null`, { cwd: PROJECT_DIR, timeout: 120000 });
   let result = branchExists.ok
-    ? await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} worktree add ${shQuote(worktree)} ${shQuote(task.branch)}`, { cwd: PROJECT_DIR, logFile, timeout: 180000 })
+    ? await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} worktree add --force ${shQuote(worktree)} ${shQuote(task.branch)}`, { cwd: PROJECT_DIR, logFile, timeout: 180000 })
     : await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} worktree add -b ${shQuote(task.branch)} ${shQuote(worktree)} ${shQuote(baseBranch)}`, { cwd: PROJECT_DIR, logFile, timeout: 180000 });
   if (!result.ok) throw new Error(`Unable to create worktree for ${task.branch}`);
+  if (branchExists.ok) await runShellLogged(`git -c safe.directory=${shQuote(worktree)} merge --no-edit ${shQuote(baseBranch)}`, { cwd: worktree, logFile, timeout: 300000 });
   return { worktree, baseBranch };
 }
 
@@ -1291,6 +1339,66 @@ function completeBugTask(task, status = 'completed') {
   saveBugWatcherState();
 }
 
+function requeueFailedBugTasks(ids) {
+  const wanted = new Set((Array.isArray(ids) ? ids : [ids]).map(id => String(id || '')).filter(Boolean));
+  if (!wanted.size) return [];
+  const requeued = [];
+  const keepCompleted = [];
+  for (const task of bugWatcherState.completed) {
+    if (!wanted.has(task.id) || !['failed', 'completed', 'removed'].includes(task.status)) {
+      keepCompleted.push(task);
+      continue;
+    }
+    const at = nowIso();
+    task.status = 'queued';
+    task.attempts = 0;
+    task.requeuedAt = at;
+    task.updatedAt = at;
+    task.startedAt = '';
+    task.finishedAt = '';
+    task.summary = 'Requeued by user request.';
+    delete task.nextRetryAt;
+    delete task.mergeStatus;
+    delete task.mergeAfter;
+    delete task.mergeTarget;
+    bugWatcherState.queue.push(task);
+    updateReportsForTask(task, 'approved', { summary: task.summary, finishedAt: '', nextRetryAt: '' });
+    for (const reportId of task.reportIds || []) addReportComment(reportId, `Failed task ${task.id} was requeued for processing.`, 'info');
+    requeued.push(task);
+  }
+  bugWatcherState.completed = keepCompleted;
+  saveBugWatcherState();
+  return requeued;
+}
+
+function processAllBugTasksNow() {
+  let queued = 0;
+  for (const task of bugWatcherState.queue) {
+    if (!task || !['queued', 'retry'].includes(task.status)) continue;
+    task.status = 'queued';
+    task.updatedAt = nowIso();
+    task.summary = `${task.summary || 'Queued for processing.'} Processing requested now.`.trim();
+    delete task.nextRetryAt;
+    normalizeTaskBranch(task);
+    updateReportsForTask(task, 'approved', { summary: task.summary, nextRetryAt: '' });
+    queued += 1;
+  }
+  const failedIds = bugWatcherState.completed.filter(task => task.status === 'failed').map(task => task.id);
+  const requeued = requeueFailedBugTasks(failedIds);
+  dedupeBugQueue();
+  saveBugWatcherState();
+  return { queued, requeued: requeued.length };
+}
+
+function finishCancelledBugTask(task) {
+  task.status = 'removed';
+  task.finishedAt = nowIso();
+  task.updatedAt = nowIso();
+  task.summary = 'Cancelled by user request.';
+  updateReportsForTask(task, 'removed', { summary: task.summary, finishedAt: task.finishedAt });
+  completeBugTask(task, 'removed');
+}
+
 async function processAutoMerges(ios) {
   if (bugAutoMergeRunning || !BUG_WATCHER_AUTO_MERGE) return;
   const task = bugWatcherState.completed.find(t => t.status === 'completed' && t.mergeStatus === 'pending' && t.mergeAfter && Date.parse(t.mergeAfter) <= Date.now());
@@ -1356,10 +1464,28 @@ async function rebuildSiteAfterFix(task, logFile) {
   saveBugWatcherState();
   appendSession(logFile, '\n[site] rebuilding control image after automated fix\n');
   await runShellLogged('docker compose -f compose.web.yml build control', { cwd: PROJECT_DIR, env, timeout: 600000, logFile });
-  appendSession(logFile, '\n[site] restarting control container after automated fix\n');
-  await runShellLogged('docker compose -f compose.web.yml up -d control', { cwd: PROJECT_DIR, env, timeout: 300000, logFile });
+  appendSession(logFile, '\n[site] scheduling control restart with helper container\n');
+  const hostDir = HOST_PROJECT_DIR || PROJECT_DIR;
+  const helperName = `${safeSlug(COMPOSE_PROJECT, 'project')}-control-restarter-${Date.now()}`;
+  const helperScript = 'sleep 2; docker compose -f compose.web.yml up -d control';
+  const helperCmd = [
+    'docker run --rm -d',
+    `--name ${shQuote(helperName)}`,
+    '-v /var/run/docker.sock:/var/run/docker.sock',
+    `-v ${shQuote(`${hostDir}:/workspace`)}`,
+    '-w /workspace',
+    `-e HOST_PROJECT_DIR=${shQuote(hostDir)}`,
+    `-e COMPOSE_PROJECT_NAME=${shQuote(COMPOSE_PROJECT)}`,
+    '-e COMPOSE_IGNORE_ORPHANS=true',
+    `-e HOST_IP=${shQuote(LOCAL_IP)}`,
+    shQuote(`${COMPOSE_PROJECT}-control`),
+    'sh -lc',
+    shQuote(helperScript)
+  ].join(' ');
+  const helper = await runShellLogged(helperCmd, { cwd: PROJECT_DIR, env, timeout: 120000, logFile });
+  if (!helper.ok) await runShellLogged('docker compose -f compose.web.yml up -d control', { cwd: PROJECT_DIR, env, timeout: 300000, logFile });
   task.siteRestartedAt = nowIso();
-  updateReportsForTask(task, 'finished', { summary: `${task.summary || ''} Site rebuild/restart completed.`.trim() });
+  updateReportsForTask(task, 'finished', { summary: `${task.summary || ''} Site restart scheduled.`.trim() });
   saveBugWatcherState();
 }
 
@@ -1390,9 +1516,17 @@ async function processNextBugTask(ios) {
   saveBugWatcherState();
   elog(ios, `Bug watcher started: ${task.title}`, 'info');
   try {
+    const finishIfCancelled = () => {
+      if (!task.cancelRequested) return false;
+      finishCancelledBugTask(task);
+      elog(ios, `Bug watcher cancelled: ${task.title}`, 'warn');
+      return true;
+    };
+    if (finishIfCancelled()) return;
     if (task.source === 'health-check') {
       const checkName = String(task.details || '').split('\n')[0].trim();
       const recheck = await runBugChecks(PROJECT_DIR, task.sessionLog);
+      if (finishIfCancelled()) return;
       const stillFailed = recheck.failed.find(check => check.name === checkName);
       if (!stillFailed) {
         task.finishedAt = nowIso();
@@ -1405,11 +1539,27 @@ async function processNextBugTask(ios) {
       task.details = `${task.details}\n\nFresh recheck still failed:\n${stillFailed.output}`.slice(-12000);
     }
     await installMissingDependencies();
+    if (finishIfCancelled()) return;
     const { worktree, baseBranch } = await ensureBugWorktree(task, task.sessionLog);
+    if (finishIfCancelled()) return;
     const prompt = buildAutofixPrompt(task, baseBranch);
-    const args = ['--prompt', prompt];
-    if (OPENCODE_SKIP_PERMISSIONS) args.push('--dangerously-skip-permissions');
-    await spawnLogged(resolveOpenCodeCommand(), args, { cwd: worktree, logFile: task.sessionLog, timeout: OPENCODE_TIMEOUT_MS, env: { ...process.env, BUG_WATCHER_TASK_ID: task.id } });
+    const args = [worktree, '--prompt', prompt];
+    if (OPENCODE_SKIP_PERMISSIONS) appendSession(task.sessionLog, '\n[opencode] --dangerously-skip-permissions is only available on opencode run; using opencode --prompt without that flag.\n');
+    const opencodeResult = await spawnLogged(resolveOpenCodeCommand(), args, {
+      cwd: worktree,
+      logFile: task.sessionLog,
+      timeout: OPENCODE_TIMEOUT_MS,
+      env: { ...process.env, BUG_WATCHER_TASK_ID: task.id },
+      onChild: child => { activeBugWatcherChild = { taskId: task.id, child }; }
+    });
+    if (activeBugWatcherChild?.taskId === task.id) activeBugWatcherChild = null;
+    if (opencodeResult.timedOut) {
+      task.details = `${task.details}\n\nopencode --prompt timed out after ${OPENCODE_TIMEOUT_MS}ms; validation will decide whether enough changes were applied.`.slice(-24000);
+      appendSession(task.sessionLog, '\n[opencode] timed out; continuing to validation checks\n');
+    } else if (!opencodeResult.ok) {
+      throw new Error(`opencode --prompt exited with code ${opencodeResult.code || 1}`);
+    }
+    if (finishIfCancelled()) return;
     const checks = await runBugChecks(worktree, task.sessionLog);
     const fix = summarizeFix(task, checks);
     task.cause = fix.cause;
@@ -1460,6 +1610,7 @@ async function processNextBugTask(ios) {
     if (task.sessionLog) appendSession(task.sessionLog, `\n[watcher error] ${err.stack || err.message}\n`);
   } finally {
     task.updatedAt = nowIso();
+    if (activeBugWatcherChild?.taskId === task.id) activeBugWatcherChild = null;
     bugWatcherState.current = null;
     saveBugWatcherState();
     bugWatcherRunning = false;
@@ -1875,18 +2026,73 @@ function mountRoutes(app, ios) {
   });
   app.delete('/api/bug-task/:id', (req, res) => {
     try {
-      const task = bugWatcherState.queue.find(t => t.id === req.params.id);
-      if (!task) return res.status(404).json({ ok: false, error: 'Queued task not found or already running' });
-      bugWatcherState.queue = bugWatcherState.queue.filter(t => t.id !== task.id);
-      task.status = 'removed';
-      task.finishedAt = nowIso();
-      task.summary = 'Removed from queue by user request.';
-      completeBugTask(task, 'removed');
-      for (const reportId of task.reportIds || []) {
-        updateReport(reportId, { status: 'removed', summary: task.summary, finishedAt: task.finishedAt });
-        addReportComment(reportId, `Removed queued task ${task.id} from ${task.branch}.`, 'warn');
+      if (bugWatcherState.current?.id === req.params.id) {
+        const task = bugWatcherState.current;
+        task.cancelRequested = true;
+        task.summary = 'Cancellation requested by user.';
+        task.updatedAt = nowIso();
+        if (activeBugWatcherChild?.taskId === task.id) {
+          activeBugWatcherChild.child.kill('SIGTERM');
+          setTimeout(() => {
+            try { if (activeBugWatcherChild?.taskId === task.id) activeBugWatcherChild.child.kill('SIGKILL'); } catch {}
+          }, 10000);
+        }
+        updateReportsForTask(task, 'processing', { summary: task.summary });
+        saveBugWatcherState();
+        return res.json({ ok: true, status: getBugWatcherPublicStatus() });
       }
+      const task = bugWatcherState.queue.find(t => t.id === req.params.id);
+      if (!task) return res.status(404).json({ ok: false, error: 'Queued task not found' });
+      bugWatcherState.queue = bugWatcherState.queue.filter(t => t.id !== task.id);
+      finishCancelledBugTask(task);
+      for (const reportId of task.reportIds || []) addReportComment(reportId, `Removed queued task ${task.id} from ${task.branch}.`, 'warn');
       res.json({ ok: true, status: getBugWatcherPublicStatus() });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+  app.post('/api/bug-task/:id/retry', (req, res) => {
+    try {
+      const requeued = requeueFailedBugTasks([req.params.id]);
+      if (!requeued.length) return res.status(404).json({ ok: false, error: 'Retryable task not found' });
+      processNextBugTask(ios);
+      res.json({ ok: true, requeued: requeued.length, status: getBugWatcherPublicStatus() });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+  app.post('/api/bug-task/:id/retry-now', (req, res) => {
+    try {
+      const task = bugWatcherState.queue.find(t => t.id === req.params.id);
+      if (!task) return res.status(404).json({ ok: false, error: 'Queued task not found' });
+      task.status = 'queued';
+      task.updatedAt = nowIso();
+      task.summary = `${task.summary || 'Queued for retry.'} Retry requested now.`.trim();
+      delete task.nextRetryAt;
+      normalizeTaskBranch(task);
+      updateReportsForTask(task, 'approved', { summary: task.summary, nextRetryAt: '' });
+      saveBugWatcherState();
+      processNextBugTask(ios);
+      res.json({ ok: true, status: getBugWatcherPublicStatus() });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+  app.post('/api/bug-tasks/retry', (req, res) => {
+    try {
+      const requeued = requeueFailedBugTasks(req.body.ids || []);
+      if (!requeued.length) return res.status(400).json({ ok: false, error: 'Select at least one failed task to retry' });
+      processNextBugTask(ios);
+      res.json({ ok: true, requeued: requeued.length, status: getBugWatcherPublicStatus() });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+  app.post('/api/bug-tasks/process-all', (req, res) => {
+    try {
+      const result = processAllBugTasksNow();
+      processNextBugTask(ios);
+      res.json({ ok: true, ...result, status: getBugWatcherPublicStatus() });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }

@@ -432,6 +432,7 @@ let busy=false;
 let stateCache={};
 let watcherTimer=null;
 let lastWatcherStatus=null;
+let selectedFailedTasks=new Set();
 const TORONTO_TZ='America/Toronto';
 
 function act(cmd, force){if(busy&&!force)return; sio.emit('action',cmd)}
@@ -826,17 +827,24 @@ function renderWatcherStatus(data){
   const activeSelection=activeId&&$(activeId)?[$(activeId).selectionStart,$(activeId).selectionEnd]:null;
   const cur=data.current;
   const flags='<div class="card-sub">Auto fix '+(data.autoFix?'on':'off')+' - processor '+he(data.processor||'opencode --prompt')+' - queued '+(data.queue||[]).length+' - max attempts '+(data.maxAttempts||5)+' - retry every '+fmtMs(data.retryDelayMs||1800000)+' - warnings are '+(data.treatWarningsAsErrors?'small errors':'informational')+' - auto-merge '+(data.autoMerge?'on':'off')+' after '+fmtMs(data.autoMergeMs||0)+'</div>';
+  const allActions='<div style="display:flex;gap:8px;margin:8px 0;flex-wrap:wrap"><button class="btn btn-t btn-sm" onclick="processAllBugTasks()">Process All Tasks Now</button><button class="btn btn-o btn-sm" onclick="runWatcherCheck()">Run Checks</button></div>';
   const taskCard=(t,actions)=>'<div class="watcher-task"><span class="'+severityClass(t.severity)+'">'+he(t.severity)+'</span><div class="change-title">'+he(t.title)+'</div><div class="card-sub">'+he(t.status)+' - '+he(t.branch)+' - attempt '+he(t.attempts||0)+'</div><div class="card-sub">'+he(taskMeta(t))+'</div>'+(t.summary?'<div class="card-sub">Summary: '+he(t.summary)+'</div>':'')+(actions||'')+'</div>';
-  const current=cur?taskCard(cur,''):'<div class="card-sub">No task is currently running.</div>';
-  const queue=(data.queue||[]).slice(0,12).map(t=>taskCard(t,'<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"><button class="btn btn-o btn-sm btn-danger" onclick="removeQueueTask(\''+he(t.id)+'\')">Remove</button></div>')).join('')||'<div class="card-sub">Queue is empty.</div>';
-  const pending=(data.completed||[]).filter(t=>t.mergeStatus&&t.mergeStatus!=='merged').slice(0,8).map(t=>taskCard(t,'<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"><button class="btn btn-o btn-sm btn-danger" onclick="rejectAutoMerge(\''+he(t.id)+'\')">Reject Auto-Merge</button></div>')).join('')||'<div class="card-sub">No fixes waiting for merge.</div>';
+  const current=cur?taskCard(cur,'<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"><button class="btn btn-o btn-sm btn-danger" onclick="removeQueueTask(\''+he(cur.id)+'\')">Cancel Task</button></div>'):'<div class="card-sub">No task is currently running.</div>';
+  const queue=(data.queue||[]).slice(0,12).map(t=>taskCard(t,'<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"><button class="btn btn-t btn-sm" onclick="retryQueuedTask(\''+he(t.id)+'\')">Retry Now</button><button class="btn btn-o btn-sm btn-danger" onclick="removeQueueTask(\''+he(t.id)+'\')">Remove from Queue</button></div>')).join('')||'<div class="card-sub">Queue is empty.</div>';
+  const pending=(data.completed||[]).filter(t=>t.mergeStatus&&t.mergeStatus!=='merged').slice(0,8).map(t=>taskCard(t,'<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"><button class="btn btn-t btn-sm" onclick="retryFailedTask(\''+he(t.id)+'\')">Retry Task</button><button class="btn btn-o btn-sm btn-danger" onclick="rejectAutoMerge(\''+he(t.id)+'\')">Reject Auto-Merge</button></div>')).join('')||'<div class="card-sub">No fixes waiting for merge.</div>';
+  const failedTasks=(data.failed||[]).filter(t=>t.status==='failed').slice(0,20);
+  const failedIds=new Set(failedTasks.map(t=>t.id));
+  selectedFailedTasks=new Set([...selectedFailedTasks].filter(id=>failedIds.has(id)));
+  const allFailedChecked=failedTasks.length&&failedTasks.every(t=>selectedFailedTasks.has(t.id));
+  const failedToolbar=failedTasks.length?'<div style="display:flex;gap:8px;margin:8px 0;flex-wrap:wrap;align-items:center"><label class="card-sub" style="display:flex;gap:6px;align-items:center"><input type="checkbox" onchange="toggleAllFailedTasks(this.checked)" '+(allFailedChecked?'checked':'')+'> Select all failed</label><button class="btn btn-t btn-sm" onclick="retrySelectedFailedTasks()">Process Selected Failed</button></div>':'';
+  const failed=failedTasks.map(t=>{const id=he(t.id);const checked=selectedFailedTasks.has(t.id)?'checked':'';return taskCard(t,'<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center"><label class="card-sub" style="display:flex;gap:6px;align-items:center"><input type="checkbox" onchange="toggleFailedTaskSelection(\''+id+'\',this.checked)" '+checked+'> Select</label><button class="btn btn-t btn-sm" onclick="retryFailedTask(\''+id+'\')">Retry Task</button></div>')}).join('')||'<div class="card-sub">No failed tasks.</div>';
   const merged=(data.completed||[]).filter(t=>t.mergeStatus==='merged').slice(0,8).map(t=>taskCard(t,'')).join('')||'<div class="card-sub">No merged fixes yet.</div>';
   const reports=(data.reports||[]).slice(0,5).map(r=>{
     const comments=(r.comments||[]).slice(-3).map(c=>'<div class="card-sub">Comment: '+he(c.message)+' <small>'+fmtDate(c.at)+'</small></div>').join('');
     const id=he(r.id);
     return '<div class="watcher-task"><span class="'+severityClass(r.severity)+'">'+he(r.severity)+'</span><div class="change-title">'+he(r.title)+'</div><div class="card-sub">'+fmtDate(r.createdAt)+' - '+he(r.status||'queued')+' - '+he(r.approval||'')+' - IPv4 '+he(r.publicIpv4||r.observedIpv4||'unknown')+'</div>'+comments+'<div class="cmd-box"><input class="cmd-input" id="bug-comment-'+id+'" placeholder="Add public feedback/comment"><button class="btn btn-t btn-sm" onclick="submitReportComment(\''+id+'\')">Comment</button></div></div>';
   }).join('');
-  $('watcher-status').innerHTML=flags+'<div class="change-title">Task In Progress</div>'+current+'<div class="change-title">Processing Queue</div>'+queue+'<div class="change-title">Pending Merge / Finished Fixes</div>'+pending+'<div class="change-title">Merged Fixes</div>'+merged+(reports?'<div class="change-title">Recent Reports</div>'+reports:'')+'<div class="card-sub">Last check: '+fmtDate(data.lastCheckAt)+' '+(data.lastCheckLog?' - '+he(data.lastCheckLog):'')+'</div>';
+  $('watcher-status').innerHTML=flags+allActions+'<div class="change-title">Task In Progress</div>'+current+'<div class="change-title">Processing Queue</div>'+queue+'<div class="change-title">Pending Merge / Finished Fixes</div>'+pending+'<div class="change-title">Failed Tasks</div>'+failedToolbar+failed+'<div class="change-title">Merged Fixes</div>'+merged+(reports?'<div class="change-title">Recent Reports</div>'+reports:'')+'<div class="card-sub">Last check: '+fmtDate(data.lastCheckAt)+' '+(data.lastCheckLog?' - '+he(data.lastCheckLog):'')+'</div>';
   Object.entries(oldValues).forEach(([id,value])=>{const el=$(id); if(el)el.value=value});
   if(activeId&&$(activeId)){const el=$(activeId); el.focus(); if(activeSelection&&el.setSelectionRange)el.setSelectionRange(activeSelection[0],activeSelection[1])}
 }
@@ -868,16 +876,50 @@ async function submitReportComment(id){
     .catch(e=>{$('bug-result').textContent='Comment failed: '+e.message});
 }
 function watcherTaskTitle(id){
-  const all=[...((lastWatcherStatus&&lastWatcherStatus.queue)||[]),...((lastWatcherStatus&&lastWatcherStatus.completed)||[]),lastWatcherStatus&&lastWatcherStatus.current].filter(Boolean);
+  const all=[...((lastWatcherStatus&&lastWatcherStatus.queue)||[]),...((lastWatcherStatus&&lastWatcherStatus.failed)||[]),...((lastWatcherStatus&&lastWatcherStatus.completed)||[]),lastWatcherStatus&&lastWatcherStatus.current].filter(Boolean);
   const found=all.find(t=>t.id===id);
   return found?found.title:id;
 }
+function toggleFailedTaskSelection(id,checked){
+  if(checked)selectedFailedTasks.add(id);else selectedFailedTasks.delete(id);
+}
+function toggleAllFailedTasks(checked){
+  const failed=((lastWatcherStatus&&lastWatcherStatus.failed)||[]).filter(t=>t.status==='failed');
+  failed.forEach(t=>{if(checked)selectedFailedTasks.add(t.id);else selectedFailedTasks.delete(t.id)});
+  if(lastWatcherStatus)renderWatcherStatus(lastWatcherStatus);
+}
+function retryFailedTask(id){
+  $('bug-result').textContent='Retrying task...';
+  fetch('/api/bug-task/'+encodeURIComponent(id)+'/retry',{method:'POST'})
+    .then(r=>r.json()).then(d=>{if(d.ok){selectedFailedTasks.delete(id);$('bug-result').textContent='Task requeued.';renderWatcherStatus(d.status)}else $('bug-result').textContent='Retry failed: '+(d.error||'unknown')})
+    .catch(e=>{$('bug-result').textContent='Retry failed: '+e.message});
+}
+function retrySelectedFailedTasks(){
+  const ids=[...selectedFailedTasks];
+  if(!ids.length){$('bug-result').textContent='Select at least one failed task first.';return}
+  $('bug-result').textContent='Requeueing selected failed tasks...';
+  fetch('/api/bug-tasks/retry',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})})
+    .then(r=>r.json()).then(d=>{if(d.ok){selectedFailedTasks.clear();$('bug-result').textContent='Requeued '+d.requeued+' failed task(s).';renderWatcherStatus(d.status)}else $('bug-result').textContent='Retry failed: '+(d.error||'unknown')})
+    .catch(e=>{$('bug-result').textContent='Retry failed: '+e.message});
+}
+function retryQueuedTask(id){
+  $('bug-result').textContent='Retrying queued task now...';
+  fetch('/api/bug-task/'+encodeURIComponent(id)+'/retry-now',{method:'POST'})
+    .then(r=>r.json()).then(d=>{if(d.ok){$('bug-result').textContent='Task retry requested now.';renderWatcherStatus(d.status)}else $('bug-result').textContent='Retry failed: '+(d.error||'unknown')})
+    .catch(e=>{$('bug-result').textContent='Retry failed: '+e.message});
+}
+function processAllBugTasks(){
+  $('bug-result').textContent='Processing every queued/retry/failed task now...';
+  fetch('/api/bug-tasks/process-all',{method:'POST'})
+    .then(r=>r.json()).then(d=>{if(d.ok){$('bug-result').textContent='Process-all requested. Queue updated: '+d.queued+', failed requeued: '+d.requeued+'.';renderWatcherStatus(d.status)}else $('bug-result').textContent='Process all failed: '+(d.error||'unknown')})
+    .catch(e=>{$('bug-result').textContent='Process all failed: '+e.message});
+}
 function removeQueueTask(id){
   const title=watcherTaskTitle(id);
-  $('confirm-title').textContent='Remove Queue Task';
-  $('confirm-body').textContent='Remove "'+title+'" from the automated queue? This will not delete the report, only stop this queued fix.';
+  $('confirm-title').textContent='Cancel Task';
+  $('confirm-body').textContent='Cancel "'+title+'"? Queued tasks are removed from the queue. A running task will be asked to stop.';
   $('confirm-danger-icon').style.display='block';
-  confirmCb=()=>fetch('/api/bug-task/'+encodeURIComponent(id),{method:'DELETE'}).then(r=>r.json()).then(d=>{if(d.ok){$('bug-result').textContent='Removed queued task.';renderWatcherStatus(d.status)}else $('bug-result').textContent='Remove failed: '+(d.error||'unknown')}).catch(e=>{$('bug-result').textContent='Remove failed: '+e.message});
+  confirmCb=()=>fetch('/api/bug-task/'+encodeURIComponent(id),{method:'DELETE'}).then(r=>r.json()).then(d=>{if(d.ok){$('bug-result').textContent='Task cancel/remove requested.';renderWatcherStatus(d.status)}else $('bug-result').textContent='Cancel failed: '+(d.error||'unknown')}).catch(e=>{$('bug-result').textContent='Cancel failed: '+e.message});
   $('confirm-modal').classList.add('open');
 }
 async function rejectAutoMerge(id){

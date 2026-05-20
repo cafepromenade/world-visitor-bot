@@ -20,6 +20,13 @@
       "Failed automated tasks retry up to five times before being marked failed",
       "Failed queue attempts wait thirty minutes before the next retry",
       "Bug watcher task processing uses opencode --prompt from each task worktree",
+      "Failed watcher tasks can be selected individually or with select-all and requeued for processing",
+      "Watcher task cards show cancel/remove controls for queued or running work and retry controls for failed work",
+      "Queued retry tasks can be retried immediately, and generated autofix branches are sanitized before worktree creation",
+      "Non-zero opencode --prompt exits now count as failed attempts instead of silently passing validation afterward",
+      "Automated site restarts are handed to a helper container so the control panel does not leave itself stopped",
+      "Process All Tasks Now clears retry waits, requeues failed tasks, and immediately starts the watcher queue",
+      "Timed-out opencode --prompt runs are force-stopped and followed by validation so the queue cannot hang forever",
       "Completed fixes auto-merge to main after five minutes unless rejected",
       "Changelog modal shows dated entries colored by severity",
       "World zip import auto-detects classic and dimensions world roots"
