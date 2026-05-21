@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>World Visitor Bot Changelog</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Google+Sans+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0f1117;--card:#1f2333;--border:#2a2e3d;--primary:#8ab4f8;--green:#34a853;--red:#ea4335;--yellow:#fbbc04;--text:#e8eaed;--text2:#9aa0a6;--radius:16px}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Google Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+.app{max-width:980px;margin:0 auto;padding:20px 16px 48px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+h1{font-size:1.35rem;font-weight:500}
+.sub{font-size:.78rem;color:var(--text2);margin-top:4px}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:24px;border:1px solid var(--border);background:transparent;color:var(--text);font:500 .78rem 'Google Sans';text-decoration:none}
+.change{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin:10px 0}
+.severity{display:inline-flex;padding:2px 8px;border-radius:999px;font-size:.62rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+.critical,.error{background:var(--red)22;color:var(--red);border:1px solid var(--red)55}
+.warning{background:var(--yellow)22;color:var(--yellow);border:1px solid var(--yellow)55}
+.fix{background:var(--green)22;color:var(--green);border:1px solid var(--green)55}
+.feature{background:var(--primary)22;color:var(--primary);border:1px solid var(--primary)55}
+.title{font-size:1rem;font-weight:500;margin:8px 0 4px}
+.date{font:.72rem 'Google Sans Mono',monospace;color:var(--text2)}
+.line{font-size:.78rem;color:var(--text2);line-height:1.5;margin-top:6px}
+.pill{display:inline-flex;margin:4px 4px 0 0;padding:4px 8px;border-radius:999px;background:#0003;color:var(--text2);font-size:.68rem}
+a{color:var(--primary)}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top">
+    <div><h1>Changelog</h1><div class="sub">Dated summaries, root causes, fixed issues, and new features.</div></div>
+    <a class="btn" href="/">Back to Dashboard</a>
+  </div>
+  <div id="list"><div class="line">Loading changelog...</div></div>
+</div>
+<script>
+const TORONTO_TZ='America/Toronto';
+const he=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+const fmt=value=>value?new Date(value).toLocaleString('en-CA',{timeZone:TORONTO_TZ,hour12:false,timeZoneName:'short'}):'unknown';
+const sev=s=>['critical','error','warning','fix','feature'].includes(String(s).toLowerCase())?String(s).toLowerCase():'feature';
+function render(items){
+  const list=document.getElementById('list');
+  if(!items||!items.length){list.innerHTML='<div class="line">No changelog entries yet.</div>';return}
+  list.innerHTML=items.map(item=>{
+    const s=sev(item.severity);
+    const fixed=(item.fixed||[]).map(x=>'<span class="pill">Fixed: '+he(x)+'</span>').join('');
+    const features=(item.features||[]).map(x=>'<span class="pill">Feature: '+he(x)+'</span>').join('');
+    const comments=(item.comments||[]).map(x=>'<div class="line"><b>Comment:</b> '+he(x)+'</div>').join('');
+    const pr=item.prUrl?'<div class="line"><a href="'+he(item.prUrl)+'" target="_blank" rel="noopener">Pull request</a></div>':'';
+    return '<article class="change"><span class="severity '+s+'">'+he(s)+'</span><div class="title">'+he(item.title||'Update')+'</div><div class="date">'+fmt(item.date)+'</div><div class="line"><b>Summary:</b> '+he(item.summary||'No summary')+'</div><div class="line"><b>Cause:</b> '+he(item.cause||'Not recorded')+'</div><div>'+fixed+features+'</div>'+comments+pr+'</article>';
+  }).join('');
+}
+fetch('/api/changelog').then(r=>r.json()).then(render).catch(e=>{document.getElementById('list').innerHTML='<div class="line">Failed to load changelog: '+he(e.message)+'</div>'});
+</script>
+</body>
+</html>

@@ -1,0 +1,41 @@
+[
+  {
+    "date": "2026-05-20T17:00:00.000Z",
+    "severity": "feature",
+    "title": "Automated bug watcher and site tools",
+    "summary": "Added queued bug reports, auto-approval, lifecycle comments, IPv4 consent capture, background validation, automated opencode repair branches, PR comments, changelog viewing, and world zip import.",
+    "cause": "The control panel needed a zero-interaction way to capture site issues, treat warnings as small errors, and keep fixes traceable.",
+    "fixed": [],
+    "features": [
+      "Report Bugs modal queues automated repair tasks and only asks once for IPv4 collection consent",
+      "Users can add public comments to bug reports after submission",
+      "Checker queues related improvements from user feedback comments automatically",
+      "After every automated fix, the checker rebuilds the control image and restarts the site container",
+      "Bug watcher stores reports and sessions in logs/bug-watcher",
+      "Reports are auto-approved, updated while processing, and finished with public comments, cause, summary, branch, session log, and PR URL",
+      "Each unrelated error gets an autofix branch while related errors share a signature",
+      "Multiple queued requests can be batched into one branch for combined processing",
+      "Watcher panel shows task-in-progress, processing queue, pending merge, and merged fix lists with elapsed time and ETA",
+      "Queued tasks can be removed with a confirmation dialog",
+      "Failed automated tasks retry up to five times before being marked failed",
+      "Failed queue attempts wait thirty minutes before the next retry",
+      "Bug watcher task processing uses opencode --prompt from each task worktree",
+      "Failed watcher tasks can be selected individually or with select-all and requeued for processing",
+      "Watcher task cards show cancel/remove controls for queued or running work and retry controls for failed work",
+      "Queued retry tasks can be retried immediately, and generated autofix branches are sanitized before worktree creation",
+      "Non-zero opencode --prompt exits now count as failed attempts instead of silently passing validation afterward",
+      "Automated site restarts are handed to a helper container so the control panel does not leave itself stopped",
+      "Process All Tasks Now clears retry waits, requeues failed tasks, and immediately starts the watcher queue",
+      "Timed-out opencode --prompt runs are force-stopped and followed by validation so the queue cannot hang forever",
+      "Completed fixes auto-merge to main after five minutes unless rejected",
+      "Changelog modal shows dated entries colored by severity",
+      "World zip import auto-detects classic and dimensions world roots"
+    ],
+    "comments": [
+      "How it went: the control panel gained a public request lifecycle so submitted reports no longer disappear after queuing.",
+      "How it should improve: future watcher runs should add regression checks for repeated signatures, keep comments synced to pull requests, use user feedback comments as follow-up requirements, and always refresh the running site after a fix."
+    ],
+    "branch": "feature/auto-bug-watcher",
+    "prUrl": ""
+  }
+]

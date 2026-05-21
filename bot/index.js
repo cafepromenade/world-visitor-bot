@@ -41,7 +41,12 @@ const BOT_STATUS_DIR = path.join(STATE_DIR, 'bots');
 const BOT_STATUS_FILE = path.join(BOT_STATUS_DIR, `${BOT_ID}.json`);
 const BLUEMAP_MAP_CONFIG = process.env.BLUEMAP_MAP_CONFIG || '';
 const BLUEMAP_MARKERS_JSON = process.env.BLUEMAP_MARKERS_JSON || '';
+const BLUEMAP_BACKUP_MARKERS_JSON = process.env.BLUEMAP_BACKUP_MARKERS_JSON || (BLUEMAP_MARKERS_JSON ? path.join(path.dirname(BLUEMAP_MARKERS_JSON), 'bot-markers.backup.json') : '');
 const BOT_PATH_MAX = readInt('BOT_PATH_MAX', 500, 2);
+const MARKER_HEARTBEAT_MS = readInt('BLUEMAP_MARKER_INTERVAL', 2000, 250);
+const BLACK_SPOT_RETRIES = readInt('BLACK_SPOT_RETRIES', 1, 0);
+const BOT_MARKER_SET = 'world-visitor-bots';
+const BOT_BACKUP_MARKER_SET = 'world-visitor-bot-backups';
 const MARKER_START = '  # WORLD_VISITOR_BOT_MARKERS_START';
 const MARKER_END = '  # WORLD_VISITOR_BOT_MARKERS_END';
 
@@ -55,6 +60,8 @@ let shuttingDown = false;
 let botStatus = 'starting';
 let currentRegion = null;
 let currentWaypoint = null;
+let currentBlackSpot = null;
+let blackSpotTargets = [];
 let pathTrace = [];
 let lastStatusWriteAt = 0;
 
@@ -83,6 +90,34 @@ function appendPathPoint(pos) {
     pathTrace.push(pos);
     if (pathTrace.length > BOT_PATH_MAX) pathTrace = pathTrace.slice(-BOT_PATH_MAX);
   }
+}
+
+function currentChunkSnapshot(pos) {
+  if (!isValidPosition(pos)) return null;
+  const center = { x: Math.floor(pos.x / 16), z: Math.floor(pos.z / 16) };
+  const prevPoint = pathTrace.length > 1 ? pathTrace[pathTrace.length - 2] : null;
+  const previous = isValidPosition(prevPoint) ? { x: Math.floor(prevPoint.x / 16), z: Math.floor(prevPoint.z / 16) } : null;
+  const radius = Math.min(RENDER_DISTANCE, 32);
+  const loaded = [];
+  try {
+    const columns = typeof bot?.world?.getColumns === 'function' ? bot.world.getColumns() : [];
+    for (const col of columns) {
+      const x = Number.parseInt(col.chunkX, 10);
+      const z = Number.parseInt(col.chunkZ, 10);
+      if (!Number.isFinite(x) || !Number.isFinite(z)) continue;
+      if (Math.abs(x - center.x) <= radius && Math.abs(z - center.z) <= radius) loaded.push({ x, z });
+    }
+  } catch {}
+  return {
+    center,
+    previous,
+    region: { x: Math.floor(center.x / 32), z: Math.floor(center.z / 32) },
+    radius,
+    loaded,
+    loadedCount: loaded.length,
+    expectedCount: (radius * 2 + 1) * (radius * 2 + 1),
+    updatedAt: new Date().toISOString()
+  };
 }
 
 function writeJsonAtomic(file, data) {
@@ -180,17 +215,21 @@ function buildBlueMapBotMarkerBlock(statuses) {
   return lines.join('\n');
 }
 
-function buildBlueMapLiveMarkerSet(statuses) {
+function buildBlueMapLiveMarkerSet(statuses, backup = false) {
   const markers = {};
   statuses.forEach((s, idx) => {
     const pos = s.position;
-    const label = `${s.username || s.id} ${s.status || 'unknown'}`;
-    markers[`${s.id}-current`] = {
+    const name = s.username || s.id;
+    const label = backup ? `${name} backup ${s.status || 'unknown'}` : `${name} live ${s.status || 'unknown'}`;
+    const updated = isoDate(s.updatedAt);
+    const color = backup ? '#fbbc04' : '#34a853';
+    markers[`${s.id}-${backup ? 'backup-' : ''}current`] = {
       type: 'html',
       label,
       position: pos,
       anchor: { x: 0, y: 0 },
-      html: `<div style='transform:translate(-50%,-100%);background:#34a853;color:#fff;border:2px solid #fff;border-radius:12px;padding:3px 8px;font:700 12px sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.45);'>${htmlEscape(s.username || s.id)}</div>`,
+      html: `<div style='transform:translate(-50%,-100%);background:${color};color:#111;border:2px solid #fff;border-radius:12px;padding:3px 8px;font:700 12px sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.45);'>${backup ? 'Backup ' : ''}${htmlEscape(name)}</div>`,
+      detail: `${htmlEscape(name)}<br>Status: ${htmlEscape(s.status || 'unknown')}<br>Region: ${htmlEscape(s.region || '-')}<br>Waypoint: ${htmlEscape(s.waypoint || '-')}<br>Last updated: ${updated}<br>Position: ${pos.x}, ${pos.y}, ${pos.z}`,
       sorting: idx,
       listed: true
     };
@@ -200,20 +239,20 @@ function buildBlueMapLiveMarkerSet(statuses) {
       center.x = roundCoord(center.x / trace.length);
       center.y = roundCoord(center.y / trace.length);
       center.z = roundCoord(center.z / trace.length);
-      markers[`${s.id}-path`] = {
+      markers[`${s.id}-${backup ? 'backup-' : ''}path`] = {
         type: 'line',
-        label: `${s.username || s.id} path`,
+        label: `${backup ? 'Backup ' : ''}${name} path`,
         position: center,
         line: trace,
         depthTest: false,
-        lineWidth: 4,
-        lineColor: idx % 4 === 0 ? { r: 52, g: 168, b: 83, a: 0.9 } : idx % 4 === 1 ? { r: 66, g: 133, b: 244, a: 0.9 } : idx % 4 === 2 ? { r: 251, g: 188, b: 4, a: 0.9 } : { r: 234, g: 67, b: 53, a: 0.9 },
+        lineWidth: backup ? 2 : 4,
+        lineColor: backup ? { r: 251, g: 188, b: 4, a: 0.75 } : idx % 4 === 0 ? { r: 52, g: 168, b: 83, a: 0.9 } : idx % 4 === 1 ? { r: 66, g: 133, b: 244, a: 0.9 } : idx % 4 === 2 ? { r: 251, g: 188, b: 4, a: 0.9 } : { r: 234, g: 67, b: 53, a: 0.9 },
         sorting: idx + 100,
         listed: true
       };
     }
   });
-  return { label: 'World Visitor Bots', toggleable: true, defaultHidden: false, sorting: -100, markers };
+  return { label: backup ? 'World Visitor Bot Backups' : 'World Visitor Bots', toggleable: true, defaultHidden: backup, sorting: backup ? -99 : -100, markers };
 }
 
 function replaceBlueMapMarkerBlock(config, block) {
@@ -259,8 +298,13 @@ function updateBlueMapLiveMarkers() {
     const statuses = readBotStatuses();
     let current = {};
     try { current = JSON.parse(fs.readFileSync(BLUEMAP_MARKERS_JSON, 'utf8')); } catch {}
-    current['world-visitor-bots'] = buildBlueMapLiveMarkerSet(statuses);
+    current[BOT_MARKER_SET] = buildBlueMapLiveMarkerSet(statuses);
+    current[BOT_BACKUP_MARKER_SET] = buildBlueMapLiveMarkerSet(statuses, true);
     writeJsonAtomic(BLUEMAP_MARKERS_JSON, current);
+    if (BLUEMAP_BACKUP_MARKERS_JSON) writeJsonAtomic(BLUEMAP_BACKUP_MARKERS_JSON, {
+      [BOT_MARKER_SET]: current[BOT_MARKER_SET],
+      [BOT_BACKUP_MARKER_SET]: current[BOT_BACKUP_MARKER_SET]
+    });
   } catch (err) {
     log(`WARN: failed to update BlueMap live markers: ${err.message}`);
   }
@@ -280,6 +324,9 @@ function writeBotStatus(status, force = false) {
     username: MC_USERNAME_FULL,
     status: botStatus,
     position: pos || pathTrace[pathTrace.length - 1] || null,
+    chunks: currentChunkSnapshot(pos || pathTrace[pathTrace.length - 1] || null),
+    blackSpot: currentBlackSpot,
+    blackSpots: blackSpotTargets.slice(-20),
     region: currentRegion,
     waypoint: currentWaypoint,
     updatedAt: new Date(now).toISOString(),
@@ -330,6 +377,10 @@ function init() {
   log(`Chunk check radius: ${CHUNK_CHECK_RADIUS}  Chunk load timeout: ${CHUNK_LOAD_TIMEOUT}ms`);
   log(`Movement mode: ${MOVE_MODE}  Step: ${MOVE_STEP} blocks  Delay: ${MOVE_DELAY}ms`);
   writeBotStatus('connecting', true);
+  if (BLUEMAP_MARKERS_JSON) {
+    const markerTimer = setInterval(updateBlueMapLiveMarkers, MARKER_HEARTBEAT_MS);
+    if (markerTimer.unref) markerTimer.unref();
+  }
 
   connect();
 }
@@ -567,11 +618,34 @@ async function waitForChunksLoaded(connId) {
     lastMissing = missing;
     lastTotal = total;
 
-    if (allLoaded) return;
+    if (allLoaded) return { ok: true, missing: 0, total, radius };
     await delay(500);
   }
 
   log(`WARN: Chunks not fully loaded after timeout (${lastMissing}/${lastTotal} sample columns missing, radius ${radius})`);
+  return { ok: false, missing: lastMissing, total: lastTotal, radius };
+}
+
+async function revisitBlackSpot(connId, waypoint, loadResult, attempt) {
+  if (!loadResult || loadResult.ok || BLACK_SPOT_RETRIES <= 0) return;
+  currentBlackSpot = {
+    x: waypoint.x,
+    y: waypoint.y,
+    z: waypoint.z,
+    missing: loadResult.missing,
+    total: loadResult.total,
+    radius: loadResult.radius,
+    attempt,
+    updatedAt: new Date().toISOString()
+  };
+  blackSpotTargets.push(currentBlackSpot);
+  if (blackSpotTargets.length > 50) blackSpotTargets = blackSpotTargets.slice(-50);
+  writeBotStatus('black-spot-retry', true);
+  log(`Black spot suspected near (${waypoint.x}, ${waypoint.y}, ${waypoint.z}); revisit ${attempt}/${BLACK_SPOT_RETRIES} (${loadResult.missing}/${loadResult.total} chunks missing)`);
+  await delay(Math.max(1000, WP_DELAY));
+  await moveToWaypoint(connId, { x: waypoint.x, y: waypoint.y + 16, z: waypoint.z });
+  await delay(750);
+  await moveToWaypoint(connId, waypoint);
 }
 
 async function flyRegion(connId, target, index) {
@@ -593,7 +667,16 @@ async function flyRegion(connId, target, index) {
 
     await moveToWaypoint(connId, wp);
 
-    await waitForChunksLoaded(connId);
+    let loadResult = await waitForChunksLoaded(connId);
+    for (let attempt = 1; attempt <= BLACK_SPOT_RETRIES && loadResult && !loadResult.ok; attempt++) {
+      await revisitBlackSpot(connId, wp, loadResult, attempt);
+      if (connId !== activeConnection) return;
+      loadResult = await waitForChunksLoaded(connId);
+    }
+    if (loadResult?.ok && currentBlackSpot) {
+      currentBlackSpot = null;
+      writeBotStatus('waypoint', true);
+    }
     if (connId !== activeConnection) return;
 
     if (i % 3 === 0) {
