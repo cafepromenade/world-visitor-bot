@@ -37,6 +37,13 @@
                 <Setter Property="Padding" Value="0,2"/>
             </Style>
 
+            <Style TargetType="TextBox" BasedOn="{StaticResource MaterialDesignOutlinedTextBox}">
+                <Setter Property="MinHeight" Value="36"/>
+                <Setter Property="Margin" Value="0,3"/>
+                <Setter Property="Padding" Value="10,4"/>
+                <Setter Property="VerticalContentAlignment" Value="Center"/>
+            </Style>
+
             <Style TargetType="RadioButton">
                 <Setter Property="Foreground" Value="{StaticResource FgPrimary}"/>
                 <Setter Property="FontSize" Value="12"/>

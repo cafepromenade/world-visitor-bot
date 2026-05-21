@@ -354,6 +354,7 @@ body{font-family:'Google Sans','Inter',sans-serif;background:var(--bg);color:var
 <script>
 const $=id=>document.getElementById(id);
 const sio=io();
+const MC_NAME_RE=/^[A-Za-z0-9_]{1,16}$/;
 let confirmCb=null, wizStep=0, wizFollow=[], wizBotNames=[], wizBotMem=[];
 let lastStatus=null;
 let busy=false;
@@ -461,6 +462,8 @@ function teleportToBot(id){
 }
 
 function teleportToFirstBot(){
+  const player=$('tp-player').value.trim();
+  if(!/^[A-Za-z0-9_]{1,16}$/.test(player)){renderLog($('log-box'),{msg:'Enter a valid Minecraft player name first.',level:'e'});return}
   const bots=(lastStatus&&lastStatus.bots)||[];
   if(!bots.length){renderLog($('log-box'),{msg:'No bot location is available yet.',level:'e'});return}
   teleportToBot(bots[0].id);
@@ -688,6 +691,7 @@ function wizUpdateBotCount(){
 
 function wizAddFollow(){
   const v=$('wiz-follow-input').value.trim();
+  if(v&&!MC_NAME_RE.test(v)){renderLog($('log-box'),{msg:'Follow player names must be 1-16 letters, numbers, or underscores.',level:'e'});return}
   if(v&&!wizFollow.includes(v)){wizFollow.push(v);wizRenderFollow()}
   $('wiz-follow-input').value='';
 }

@@ -11,6 +11,8 @@ namespace OverworldVisitor;
 
 public partial class MainWindow : Window
 {
+    private const string DefaultWorldPath = "./mc-data/world";
+    private const string DefaultNewWorldPath = "./mc-data-new/world";
     private CancellationTokenSource? _monitorCts;
     private bool _isRunning;
     private int _totalRegions, _visitedRegions, _currentIndex;
@@ -29,6 +31,9 @@ public partial class MainWindow : Window
         RegexOptions.Compiled);
     private static readonly Regex WaypointRx = new(
         @"waypoint\s*(\d+)/(\d+)",
+        RegexOptions.Compiled);
+    private static readonly Regex PlayerNameRx = new(
+        @"^[A-Za-z0-9_]{1,16}$",
         RegexOptions.Compiled);
 
     public MainWindow()
@@ -50,11 +55,24 @@ public partial class MainWindow : Window
 
     private static string ResolveProjectRoot()
     {
+        var envRoot = Environment.GetEnvironmentVariable("PROJECT_DIR");
+        if (LooksLikeProjectRoot(envRoot)) return Path.GetFullPath(envRoot!);
+
+        var cwd = Directory.GetCurrentDirectory();
+        if (LooksLikeProjectRoot(cwd)) return Path.GetFullPath(cwd);
+
         var dir = AppContext.BaseDirectory;
-        while (dir != null && !File.Exists(Path.Combine(dir, "compose.yml")))
+        while (!string.IsNullOrEmpty(dir))
+        {
+            if (LooksLikeProjectRoot(dir)) return Path.GetFullPath(dir);
             dir = Path.GetDirectoryName(dir);
-        return dir ?? Directory.GetCurrentDirectory();
+        }
+
+        return cwd;
     }
+
+    private static bool LooksLikeProjectRoot(string? dir) =>
+        !string.IsNullOrWhiteSpace(dir) && File.Exists(Path.Combine(dir, "compose.yml"));
 
     private void LoadSettings()
     {
@@ -75,7 +93,7 @@ public partial class MainWindow : Window
                     case "FLY_Y": txtFlyY.Text = v; break;
                     case "GRID_STEP": txtGridStep.Text = v; break;
                     case "BOT_COUNT": txtBotCount.Text = v; break;
-                    case "WORLD_PATH": txtWorldPath.Text = v; break;
+                    case "WORLD_PATH": txtWorldPath.Text = NormalizeWorldPath(v); break;
                     case "FOLLOW_PLAYER":
                         txtFollowPlayer.Text = v;
                         cbFollow.IsChecked = !string.IsNullOrWhiteSpace(v);
@@ -90,20 +108,41 @@ public partial class MainWindow : Window
     {
         var envPath = Path.Combine(_projectRoot, ".env");
         var values = ReadEnvValues(envPath);
+        var worldPath = NormalizeWorldPath(txtWorldPath.Text.Trim());
+
+        string ExistingOrDefault(string key, string fallback) =>
+            values.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value) ? value : fallback;
+
+        values["MC_HOST"] = "mc";
         values["MC_USERNAME"] = txtUsername.Text.Trim();
         values["MC_PORT"] = txtPort.Text.Trim();
-        values["MC_AUTH"] = values.TryGetValue("MC_AUTH", out var auth) && !string.IsNullOrWhiteSpace(auth) ? auth : "offline";
+        values["MC_AUTH"] = ExistingOrDefault("MC_AUTH", "offline");
         values["RENDER_DISTANCE"] = txtRender.Text.Trim();
         values["FLY_Y"] = txtFlyY.Text.Trim();
         values["GRID_STEP"] = txtGridStep.Text.Trim();
         values["BOT_COUNT"] = txtBotCount.Text.Trim();
-        values["WORLD_PATH"] = txtWorldPath.Text.Trim();
-        values["FOLLOW_PLAYER"] = cbFollow.IsChecked == true ? txtFollowPlayer.Text.Trim() : "";
+        values["WORLD_PATH"] = worldPath;
+        values["WP_DELAY"] = ExistingOrDefault("WP_DELAY", "2000");
+        values["REGION_DELAY"] = ExistingOrDefault("REGION_DELAY", "2000");
+        values["CHUNK_LOAD_TIMEOUT"] = ExistingOrDefault("CHUNK_LOAD_TIMEOUT", "60000");
+        values["CHUNK_CHECK_RADIUS"] = ExistingOrDefault("CHUNK_CHECK_RADIUS", "1");
+        values["MOVE_MODE"] = ExistingOrDefault("MOVE_MODE", "smooth");
+        values["MOVE_STEP"] = ExistingOrDefault("MOVE_STEP", "32");
+        values["MOVE_DELAY"] = ExistingOrDefault("MOVE_DELAY", "150");
+        values["MC_MEMORY"] = ExistingOrDefault("MC_MEMORY", "12G");
+        values["BOT_MEMORY"] = ExistingOrDefault("BOT_MEMORY", "2G");
+        values["BLUEMAP_HOST"] = ExistingOrDefault("BLUEMAP_HOST", "bluemap");
+        values["BLUEMAP_PORT"] = ExistingOrDefault("BLUEMAP_PORT", "8100");
+        values["BLUEMAP_MAP"] = ExistingOrDefault("BLUEMAP_MAP", "overworld");
+        values["FOLLOW_PLAYER"] = cbFollow.IsChecked == true ? NormalizeFollowPlayers(txtFollowPlayer.Text) : "";
 
         var orderedKeys = new[]
         {
-            "MC_USERNAME", "MC_PORT", "MC_AUTH", "RENDER_DISTANCE", "FLY_Y",
-            "GRID_STEP", "BOT_COUNT", "WORLD_PATH", "FOLLOW_PLAYER"
+            "MC_HOST", "MC_PORT", "MC_USERNAME", "MC_AUTH", "RENDER_DISTANCE", "FLY_Y",
+            "GRID_STEP", "BOT_COUNT", "WORLD_PATH", "WP_DELAY", "REGION_DELAY",
+            "CHUNK_LOAD_TIMEOUT", "CHUNK_CHECK_RADIUS", "MOVE_MODE", "MOVE_STEP",
+            "MOVE_DELAY", "MC_MEMORY", "BOT_MEMORY", "BLUEMAP_HOST", "BLUEMAP_PORT",
+            "BLUEMAP_MAP", "FOLLOW_PLAYER"
         };
 
         var lines = new List<string> { "# Overworld Visitor configuration" };
@@ -132,6 +171,22 @@ public partial class MainWindow : Window
         return values;
     }
 
+    private static string NormalizeWorldPath(string value)
+    {
+        var normalized = value.Trim().Replace('\\', '/');
+        return string.IsNullOrWhiteSpace(normalized) || normalized.Equals("./world", StringComparison.OrdinalIgnoreCase)
+            ? DefaultWorldPath
+            : normalized;
+    }
+
+    private static string NormalizeFollowPlayers(string value)
+    {
+        return string.Join(",", value
+            .Split(new[] { ',', ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(name => PlayerNameRx.IsMatch(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase));
+    }
+
     public void ApplyCliOptions(CliOptions? opts)
     {
         if (opts == null) return;
@@ -146,7 +201,19 @@ public partial class MainWindow : Window
 
     // ── Event handlers ──────────
     private void OnSettingChanged(object sender, TextChangedEventArgs e) { if (_initialized) SaveSettings(); }
-    private void OnModeChanged(object sender, RoutedEventArgs e) { if (_initialized) SaveSettings(); }
+    private void OnModeChanged(object sender, RoutedEventArgs e)
+    {
+        if (!_initialized) return;
+
+        var currentPath = NormalizeWorldPath(txtWorldPath.Text.Trim());
+        if (currentPath.Equals(DefaultWorldPath, StringComparison.OrdinalIgnoreCase) ||
+            currentPath.Equals(DefaultNewWorldPath, StringComparison.OrdinalIgnoreCase))
+        {
+            txtWorldPath.Text = rbNew.IsChecked == true ? DefaultNewWorldPath : DefaultWorldPath;
+        }
+
+        SaveSettings();
+    }
 
     private void OnFollowChanged(object sender, RoutedEventArgs e)
     {
@@ -226,7 +293,7 @@ public partial class MainWindow : Window
     private void WriteFollowFile()
     {
         var followPath = Path.Combine(_projectRoot, "state", "follow_player.txt");
-        var name = cbFollow.IsChecked == true ? txtFollowPlayer.Text.Trim() : "";
+        var name = cbFollow.IsChecked == true ? NormalizeFollowPlayers(txtFollowPlayer.Text) : "";
         Directory.CreateDirectory(Path.GetDirectoryName(followPath)!);
         File.WriteAllText(followPath, name);
     }
@@ -240,9 +307,10 @@ public partial class MainWindow : Window
         _totalRegions = CountRegionFiles();
         _visitedRegions = LoadVisitedCount();
         _currentIndex = _visitedRegions;
-        var todo = _totalRegions - _visitedRegions;
+        var hasRegionCount = _totalRegions > 0;
+        var todo = hasRegionCount ? _totalRegions - _visitedRegions : -1;
 
-        if (todo <= 0)
+        if (hasRegionCount && todo <= 0)
         {
             Log("All regions already visited. Nothing to do.");
             UpdateProgress();
@@ -255,16 +323,19 @@ public partial class MainWindow : Window
 
         SetRunning(true);
         UpdateProgress();
-        Log($"Starting with {composeFile} | {todo} regions to visit | {_totalRegions} total");
+        Log(hasRegionCount
+            ? $"Starting with {composeFile} | {todo} regions to visit | {_totalRegions} total"
+            : $"Starting with {composeFile} | region count unknown; visitor will scan the mounted world");
 
         try
         {
             var botCount = int.TryParse(txtBotCount.Text, out var bc) ? bc : 1;
-            var profile = botCount > 1 ? "--profile multi " : "";
-            var services = "mc visitor";
-            if (botCount > 1) services += " visitor1";
-            if (botCount > 2) services += " visitor2";
-            if (botCount > 3) services += " visitor3";
+            var allRegions = rbAll.IsChecked == true;
+            var profile = allRegions && botCount > 1 ? "--profile multi " : "";
+            var services = allRegions ? "mc visitor" : "mc visitor-new";
+            if (allRegions && botCount > 1) services += " visitor1";
+            if (allRegions && botCount > 2) services += " visitor2";
+            if (allRegions && botCount > 3) services += " visitor3";
             var up = await RunCmd("docker", $"compose -f \"{composeFile}\" {profile}up -d {services}");
             Log(up);
 
@@ -309,11 +380,12 @@ public partial class MainWindow : Window
     {
         var composeFile = rbAll.IsChecked == true ? "compose.yml" : "compose.new.yml";
         var botCount = int.TryParse(txtBotCount.Text, out var bc) ? bc : 1;
-        var profile = botCount > 1 ? "--profile multi " : "";
-        var services = "mc visitor";
-        if (botCount > 1) services += " visitor1";
-        if (botCount > 2) services += " visitor2";
-        if (botCount > 3) services += " visitor3";
+        var allRegions = rbAll.IsChecked == true;
+        var profile = allRegions && botCount > 1 ? "--profile multi " : "";
+        var services = allRegions ? "mc visitor" : "mc visitor-new";
+        if (allRegions && botCount > 1) services += " visitor1";
+        if (allRegions && botCount > 2) services += " visitor2";
+        if (allRegions && botCount > 3) services += " visitor3";
         var cmd = $"docker compose -f {composeFile} {profile}up {services}";
         Clipboard.SetText(cmd);
         Log($"Command copied: {cmd}");
@@ -344,7 +416,8 @@ public partial class MainWindow : Window
             var psi = new ProcessStartInfo("docker", $"compose -f \"{composeFile}\" logs -f --tail 0 {serviceName}")
             {
                 RedirectStandardOutput = true, RedirectStandardError = true,
-                UseShellExecute = false, CreateNoWindow = true
+                UseShellExecute = false, CreateNoWindow = true,
+                WorkingDirectory = _projectRoot
             };
             using var proc = Process.Start(psi)!;
             var read = ReadLinesAsync(proc.StandardOutput, ct);
@@ -385,6 +458,7 @@ public partial class MainWindow : Window
         if (rm.Success)
         {
             _currentIndex = int.Parse(rm.Groups[1].Value) - 1;
+            _totalRegions = int.Parse(rm.Groups[2].Value);
             _currentRx = int.Parse(rm.Groups[3].Value);
             _currentRz = int.Parse(rm.Groups[4].Value);
             _lastRegionText = $"({_currentRx}, {_currentRz})";
@@ -412,6 +486,7 @@ public partial class MainWindow : Window
         if (sm.Success)
         {
             _visitedRegions = int.Parse(sm.Groups[1].Value);
+            _totalRegions = int.Parse(sm.Groups[2].Value);
             UpdateProgress();
         }
 
@@ -474,7 +549,7 @@ public partial class MainWindow : Window
 
     private int CountRegionFiles()
     {
-        var worldPath = string.IsNullOrEmpty(txtWorldPath.Text) ? Path.Combine(_projectRoot, "world") : txtWorldPath.Text;
+        var worldPath = string.IsNullOrEmpty(txtWorldPath.Text) ? DefaultWorldPath : NormalizeWorldPath(txtWorldPath.Text);
         if (!Path.IsPathRooted(worldPath))
             worldPath = Path.Combine(_projectRoot, worldPath);
         var dir = Path.Combine(worldPath, "dimensions", "minecraft", "overworld", "region");
@@ -579,6 +654,21 @@ public partial class MainWindow : Window
     private void UpdateProgress()
     {
         var done = _visitedRegions;
+        if (_totalRegions <= 0)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                progressRegions.IsIndeterminate = _isRunning;
+                progressRegions.Value = 0;
+                lblProgress.Content = _isRunning ? "Running; waiting for region count" : "No region files counted";
+                lblStatus.Content = _isRunning ? "Running" : "Ready";
+                lblStatus.Foreground = _isRunning
+                    ? new SolidColorBrush(Color.FromRgb(0, 200, 0))
+                    : new SolidColorBrush(Color.FromRgb(144, 144, 160));
+            });
+            return;
+        }
+
         var pct = _totalRegions > 0 ? Math.Min(100, (int)((double)done / _totalRegions * 100)) : 0;
         var statusText = _isRunning
             ? $"Visiting... {done}/{_totalRegions}"
@@ -586,6 +676,7 @@ public partial class MainWindow : Window
 
         Dispatcher.Invoke(() =>
         {
+            progressRegions.IsIndeterminate = false;
             progressRegions.Value = pct;
             lblProgress.Content = $"{pct}%  ({done}/{_totalRegions})";
             lblStatus.Content = statusText;

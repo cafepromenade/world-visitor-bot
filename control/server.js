@@ -5,6 +5,7 @@ const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const net = require('net');
+const os = require('os');
 
 const PROJECT_DIR = process.env.PROJECT_DIR || '/app/project';
 const PORT = parseInt(process.env.PORT || '80');
@@ -20,6 +21,7 @@ const bluemapMarkersJson = path.join(bluemapWebDir, 'maps', 'overworld', 'live',
 const COMPOSE_PROJECT = process.env.COMPOSE_PROJECT_NAME || path.basename(PROJECT_DIR);
 const ALL_VISITOR_SERVICES = ['visitor', 'visitor1', 'visitor2', 'visitor3'];
 const ALL_MANAGED_SERVICES = ['mc', ...ALL_VISITOR_SERVICES, 'bluemap'];
+const PLAYER_NAME_RE = /^[A-Za-z0-9_]{1,16}$/;
 
 let etaData = { regionsStarted: 0, firstRegionAt: null, lastRegionAt: null, wpTotal: 0, wpDone: 0, wpStart: null };
 let seenMcLogs = [];
@@ -30,12 +32,13 @@ let logBotStatuses = new Map();
 function getLocalIP() {
   const provided = process.env.HOST_IP;
   if (provided) return provided;
-  try {
-    const { execSync } = require('child_process');
-    const gw = execSync("ip route get 1 2>/dev/null | awk '{print $7;exit}'").toString().trim();
-    if (gw && !gw.startsWith('172.')) return gw;
-  } catch {}
-  return 'localhost';
+  const candidates = [];
+  for (const addresses of Object.values(os.networkInterfaces())) {
+    for (const address of addresses || []) {
+      if (address.family === 'IPv4' && !address.internal) candidates.push(address.address);
+    }
+  }
+  return candidates.find(ip => !ip.startsWith('172.')) || candidates[0] || 'localhost';
 }
 const LOCAL_IP = getLocalIP();
 
@@ -387,18 +390,59 @@ function readEnv() {
   return cfg;
 }
 
+function setting(settings, current, key, fallback) {
+  return settings[key] ?? current[key] ?? fallback;
+}
+
+function normalizeFollowPlayers(value) {
+  return [...new Set(String(value || '')
+    .split(/[,\n\r\t ]+/)
+    .map(name => name.trim())
+    .filter(name => PLAYER_NAME_RE.test(name)))].join(',');
+}
+
 function writeEnv(settings) {
-  fs.writeFileSync(envPath, [
-    '# Overworld Visitor', `MC_HOST=mc`, `MC_PORT=25565`,
-    `MC_USERNAME=${settings.MC_USERNAME||'Bot'}`, `MC_AUTH=offline`,
-    `RENDER_DISTANCE=${settings.RENDER_DISTANCE||'28'}`,
-    `FLY_Y=${settings.FLY_Y||'200'}`, `GRID_STEP=${settings.GRID_STEP||'160'}`,
-    `BOT_COUNT=${settings.BOT_COUNT||'1'}`, `WORLD_PATH=${settings.WORLD_PATH||'./mc-data/world'}`,
-    `WP_DELAY=2000`, `REGION_DELAY=2000`, `CHUNK_LOAD_TIMEOUT=60000`,
-    `MC_MEMORY=${settings.MC_MEMORY||'12G'}`, `BOT_MEMORY=${settings.BOT_MEMORY||'2G'}`,
-    `BLUEMAP_HOST=bluemap`, `BLUEMAP_PORT=8100`, `BLUEMAP_MAP=overworld`,
-    `FOLLOW_PLAYER=${settings.FOLLOW_PLAYER||''}`, ''
-  ].join('\n'));
+  const current = readEnv();
+  const values = { ...current };
+  Object.assign(values, {
+    MC_HOST: 'mc',
+    MC_PORT: '25565',
+    MC_USERNAME: setting(settings, current, 'MC_USERNAME', 'Bot'),
+    MC_AUTH: 'offline',
+    RENDER_DISTANCE: setting(settings, current, 'RENDER_DISTANCE', '28'),
+    FLY_Y: setting(settings, current, 'FLY_Y', '200'),
+    GRID_STEP: setting(settings, current, 'GRID_STEP', '160'),
+    BOT_COUNT: setting(settings, current, 'BOT_COUNT', '1'),
+    WORLD_PATH: setting(settings, current, 'WORLD_PATH', './mc-data/world'),
+    WP_DELAY: setting(settings, current, 'WP_DELAY', '2000'),
+    REGION_DELAY: setting(settings, current, 'REGION_DELAY', '2000'),
+    CHUNK_LOAD_TIMEOUT: setting(settings, current, 'CHUNK_LOAD_TIMEOUT', '60000'),
+    CHUNK_CHECK_RADIUS: setting(settings, current, 'CHUNK_CHECK_RADIUS', '1'),
+    MOVE_MODE: setting(settings, current, 'MOVE_MODE', 'smooth'),
+    MOVE_STEP: setting(settings, current, 'MOVE_STEP', '32'),
+    MOVE_DELAY: setting(settings, current, 'MOVE_DELAY', '150'),
+    MC_MEMORY: setting(settings, current, 'MC_MEMORY', '12G'),
+    BOT_MEMORY: setting(settings, current, 'BOT_MEMORY', '2G'),
+    BLUEMAP_HOST: 'bluemap',
+    BLUEMAP_PORT: '8100',
+    BLUEMAP_MAP: 'overworld',
+    FOLLOW_PLAYER: normalizeFollowPlayers(settings.FOLLOW_PLAYER ?? current.FOLLOW_PLAYER ?? '')
+  });
+
+  const ordered = [
+    'MC_HOST', 'MC_PORT', 'MC_USERNAME', 'MC_AUTH', 'RENDER_DISTANCE', 'FLY_Y',
+    'GRID_STEP', 'BOT_COUNT', 'WORLD_PATH', 'WP_DELAY', 'REGION_DELAY',
+    'CHUNK_LOAD_TIMEOUT', 'CHUNK_CHECK_RADIUS', 'MOVE_MODE', 'MOVE_STEP',
+    'MOVE_DELAY', 'MC_MEMORY', 'BOT_MEMORY', 'BLUEMAP_HOST', 'BLUEMAP_PORT',
+    'BLUEMAP_MAP', 'FOLLOW_PLAYER'
+  ];
+  const known = new Set(ordered);
+  const lines = ['# Overworld Visitor'];
+  lines.push(...ordered.map(key => `${key}=${values[key]}`));
+  lines.push(...Object.keys(values).filter(key => !known.has(key)).sort().map(key => `${key}=${values[key]}`));
+  lines.push('');
+  fs.writeFileSync(envPath, lines.join('\n'));
+
   if (settings.stateData) {
     const file = path.join(stateDir,'visited.json');
     let existing = {};

@@ -18,7 +18,7 @@ services:
       ENABLE_COMMAND_BLOCK: "true"
       ENABLE_RCON: "true"
       RCON_PASSWORD: "visitor"
-      MEMORY: "4G"
+      MEMORY: "${MC_MEMORY:-4G}"
       USE_AIKAR_FLAGS: "true"
       JVM_OPTS: "-DPaper.useAtomicWorldMove=false"
       MAX_TICK_TIME: "-1"
@@ -41,6 +41,7 @@ services:
     image: world-visitor-bot-visitor:latest
     build: ./bot
     restart: "no"
+    mem_limit: "${BOT_MEMORY:-2G}"
     depends_on:
       mc:
         condition: service_healthy

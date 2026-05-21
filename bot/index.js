@@ -35,6 +35,7 @@ const MOVE_DELAY = readInt('MOVE_DELAY', 150, 0);
 const MOVE_REACH_DISTANCE = readInt('MOVE_REACH_DISTANCE', 8, 1);
 const SHUTDOWN_ON_COMPLETE = process.env.SHUTDOWN_ON_COMPLETE === 'true';
 const FOLLOW_PLAYER = process.env.FOLLOW_PLAYER || '';
+const PLAYER_NAME_RE = /^[A-Za-z0-9_]{1,16}$/;
 const BOT_ID = `bot${BOT_INDEX}`;
 const BOT_STATUS_DIR = path.join(STATE_DIR, 'bots');
 const BOT_STATUS_FILE = path.join(BOT_STATUS_DIR, `${BOT_ID}.json`);
@@ -395,9 +396,10 @@ function onSpawn(connId) {
   writeBotStatus('spawned', true);
   reconnectAttempts = 0;
   chat(`/gamemode creative ${MC_USERNAME_FULL}`);
-  if (FOLLOW_PLAYER) {
-    chat(`/op ${FOLLOW_PLAYER}`);
-    log(`OP'd follow player: ${FOLLOW_PLAYER}`);
+  const followPlayers = getFollowPlayers();
+  if (followPlayers.length) {
+    followPlayers.forEach(player => chat(`/op ${player}`));
+    log(`OP'd follow player${followPlayers.length === 1 ? '' : 's'}: ${followPlayers.join(', ')}`);
   }
   setTimeout(() => {
     if (connId !== activeConnection) return;
@@ -465,13 +467,21 @@ function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function getFollowPlayer() {
+function splitPlayerList(value) {
+  return [...new Set(String(value || '')
+    .split(/[,\n\r\t ]+/)
+    .map(name => name.trim())
+    .filter(name => PLAYER_NAME_RE.test(name)))];
+}
+
+function getFollowPlayers() {
   const followFile = path.join(STATE_DIR, 'follow_player.txt');
   try {
     const value = fs.readFileSync(followFile, 'utf8').trim();
-    if (value) return value;
+    const players = splitPlayerList(value);
+    if (players.length) return players;
   } catch {}
-  return FOLLOW_PLAYER;
+  return splitPlayerList(FOLLOW_PLAYER);
 }
 
 function tpCommand(name, x, y, z) {
@@ -493,7 +503,7 @@ async function waitForPosition(target, timeout = 5000) {
 async function moveToWaypoint(connId, target) {
   if (connId !== activeConnection || !bot.entity) return;
 
-  const followPlayer = getFollowPlayer();
+  const followPlayers = getFollowPlayers();
   const startPos = bot.entity.position;
   const start = { x: startPos.x, y: startPos.y, z: startPos.z };
   const dx = target.x - start.x;
@@ -508,7 +518,7 @@ async function moveToWaypoint(connId, target) {
     const x = start.x + dx * t;
     const y = start.y + dy * t;
     const z = start.z + dz * t;
-    if (followPlayer) tpCommand(followPlayer, x, y + 5, z);
+    followPlayers.forEach(player => tpCommand(player, x, y + 5, z));
     tpCommand(MC_USERNAME_FULL, x, y, z);
     writeBotStatus('moving');
     if (step < steps || MOVE_DELAY > 0) {
