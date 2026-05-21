@@ -1359,6 +1359,12 @@ function taskHasUserRejection(task) {
 }
 
 function scheduleAutoMerge(task) {
+  if (task.noCodeRepair) {
+    task.mergeStatus = 'not-needed';
+    task.mergedAt = task.mergedAt || nowIso();
+    updateReportsForTask(task, 'finished', { mergeStatus: task.mergeStatus, mergedAt: task.mergedAt });
+    return;
+  }
   if (!BUG_WATCHER_AUTO_MERGE || !task.branch) {
     task.mergeStatus = 'manual';
     return;
@@ -1587,6 +1593,7 @@ async function processNextBugTask(ios) {
         task.finishedAt = nowIso();
         task.summary = `No code repair needed. ${checkName || task.title} now passes with the current validation rules.`;
         task.cause = `A prior automated health check queued ${task.title}, but a fresh recheck passed before opencode ran.`;
+        task.noCodeRepair = true;
         completeBugTask(task, 'completed');
         elog(ios, `Bug watcher skipped stale task: ${task.title}`, 'done');
         return;
