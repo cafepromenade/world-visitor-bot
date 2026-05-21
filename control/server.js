@@ -1627,10 +1627,16 @@ async function processNextBugTask(ios) {
       appendChangelogEntry({ severity: task.severity === 'warning' ? 'warning' : 'fix', title: task.title, summary: task.summary, cause: task.cause, fixed: [task.details.slice(0, 300)], comments, branch: task.branch }, worktree);
       appendRuntimeChangelogEntry({ severity: task.severity === 'warning' ? 'warning' : 'fix', title: task.title, summary: task.summary, cause: task.cause, fixed: [task.details.slice(0, 300)], comments, branch: task.branch });
       const status = await runShellLogged('git status --short', { cwd: worktree, logFile: task.sessionLog });
+      if (!status.ok) throw new Error((status.stderr || status.stdout || 'Git status failed').slice(-1200));
       if (status.stdout.trim()) {
-        await runShellLogged('git add -A', { cwd: worktree, logFile: task.sessionLog });
-        await runShellLogged(`git commit -m ${shQuote(`fix: auto repair ${task.title}`)}`, { cwd: worktree, logFile: task.sessionLog, timeout: 180000 });
-        if (OPENCODE_AUTO_PUSH) await runShellLogged(`git push -u origin ${shQuote(task.branch)}`, { cwd: worktree, logFile: task.sessionLog, timeout: 300000 });
+        let result = await runShellLogged('git add -A', { cwd: worktree, logFile: task.sessionLog });
+        if (!result.ok) throw new Error((result.stderr || result.stdout || 'Git add failed').slice(-1200));
+        result = await runShellLogged(`git -c user.name=${shQuote(process.env.GIT_AUTHOR_NAME || 'Overworld Visitor Bot')} -c user.email=${shQuote(process.env.GIT_AUTHOR_EMAIL || 'overworld-visitor-bot@example.invalid')} commit -m ${shQuote(`fix: auto repair ${task.title}`)}`, { cwd: worktree, logFile: task.sessionLog, timeout: 180000 });
+        if (!result.ok) throw new Error((result.stderr || result.stdout || 'Git commit failed').slice(-1200));
+        if (OPENCODE_AUTO_PUSH) {
+          result = await runShellLogged(`git push -u origin ${shQuote(task.branch)}`, { cwd: worktree, logFile: task.sessionLog, timeout: 300000 });
+          if (!result.ok) throw new Error((result.stderr || result.stdout || 'Git push failed').slice(-1200));
+        }
         task.prUrl = await createOrUpdatePullRequest(task, worktree, baseBranch, task.sessionLog);
       }
       task.finishedAt = nowIso();
