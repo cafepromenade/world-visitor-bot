@@ -583,6 +583,8 @@ function teleportToBot(id){
 }
 
 function teleportToFirstBot(){
+  const player=$('tp-player').value.trim();
+  if(!/^[A-Za-z0-9_]{1,16}$/.test(player)){renderLog($('log-box'),{msg:'Enter a valid Minecraft player name first.',level:'e'});return}
   const bots=(lastStatus&&lastStatus.bots)||[];
   if(!bots.length){renderLog($('log-box'),{msg:'No bot location is available yet.',level:'e'});return}
   teleportToBot(bots[0].id);

@@ -7,10 +7,10 @@ services:
       - '3000:3000'
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - .:/workspace
+      - ${HOST_PROJECT_DIR:-.}:/workspace
     environment:
       - PROJECT_DIR=/workspace
-      - HOST_PROJECT_DIR=${HOST_PROJECT_DIR:-.}
+      - HOST_PROJECT_DIR=${HOST_PROJECT_DIR:-/home/docker/world-visitor-bot}
       - COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-world-visitor-bot}
       - DOMAIN=${DOMAIN:-bigheados.com}
       - HOST_IP=${HOST_IP:-}
