@@ -1449,6 +1449,7 @@ async function processAutoMerges(ios) {
   if (!task) return;
   bugAutoMergeRunning = true;
   const logFile = path.join(bugSessionsDir, `${task.id}-merge-${sessionStamp()}.log`);
+  let mergeDir = '';
   try {
     if (taskHasUserRejection(task)) {
       task.mergeStatus = 'blocked';
@@ -1463,16 +1464,19 @@ async function processAutoMerges(ios) {
     updateReportsForTask(task, 'finished', { mergeStatus: 'merging' });
     saveBugWatcherState();
     elog(ios, `Auto-merging ${task.branch} to ${BUG_WATCHER_MERGE_BRANCH}`, 'info');
-    const mergeDir = path.join(bugWorktreesDir, `merge-${safeSlug(task.id)}`);
+    mergeDir = path.join(bugWorktreesDir, `merge-${safeSlug(task.id)}`);
     if (fs.existsSync(mergeDir)) fs.rmSync(mergeDir, { recursive: true, force: true });
-    await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} fetch origin ${shQuote(BUG_WATCHER_MERGE_BRANCH)} ${shQuote(task.branch)}`, { cwd: PROJECT_DIR, timeout: 300000, logFile });
-    await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} worktree add -B ${shQuote(BUG_WATCHER_MERGE_BRANCH)} ${shQuote(mergeDir)} ${shQuote(`origin/${BUG_WATCHER_MERGE_BRANCH}`)}`, { cwd: PROJECT_DIR, timeout: 180000, logFile });
-    let result = await runShellLogged(`git merge --no-ff ${shQuote(task.branch)} -m ${shQuote(`merge: ${task.title}`)}`, { cwd: mergeDir, timeout: 300000, logFile });
+    let result = await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} fetch origin ${shQuote(BUG_WATCHER_MERGE_BRANCH)} ${shQuote(task.branch)}`, { cwd: PROJECT_DIR, timeout: 300000, logFile });
+    if (!result.ok) throw new Error((result.stderr || result.stdout || 'Fetch failed').slice(-1200));
+    result = await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} worktree prune`, { cwd: PROJECT_DIR, timeout: 120000, logFile });
+    if (!result.ok) throw new Error((result.stderr || result.stdout || 'Worktree prune failed').slice(-1200));
+    result = await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} worktree add --detach ${shQuote(mergeDir)} ${shQuote(`origin/${BUG_WATCHER_MERGE_BRANCH}`)}`, { cwd: PROJECT_DIR, timeout: 180000, logFile });
+    if (!result.ok) throw new Error((result.stderr || result.stdout || 'Worktree add failed').slice(-1200));
+    result = await runShellLogged(`git merge --no-ff ${shQuote(`origin/${task.branch}`)} -m ${shQuote(`merge: ${task.title}`)}`, { cwd: mergeDir, timeout: 300000, logFile });
     if (!result.ok) throw new Error((result.stderr || result.stdout || 'Merge failed').slice(-1200));
-    result = await runShellLogged(`git push origin ${shQuote(BUG_WATCHER_MERGE_BRANCH)}`, { cwd: mergeDir, timeout: 300000, logFile });
+    result = await runShellLogged(`git push origin ${shQuote(`HEAD:${BUG_WATCHER_MERGE_BRANCH}`)}`, { cwd: mergeDir, timeout: 300000, logFile });
     if (!result.ok) throw new Error((result.stderr || result.stdout || 'Push failed').slice(-1200));
     await runShellLogged(`git push origin --delete ${shQuote(task.branch)}`, { cwd: mergeDir, timeout: 180000, logFile });
-    await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} worktree remove ${shQuote(mergeDir)} --force`, { cwd: PROJECT_DIR, timeout: 120000, logFile });
     task.mergeStatus = 'merged';
     task.mergedAt = nowIso();
     task.updatedAt = nowIso();
@@ -1491,6 +1495,13 @@ async function processAutoMerges(ios) {
     saveBugWatcherState();
     elog(ios, `Auto-merge failed: ${err.message}`, 'error');
   } finally {
+    if (mergeDir) {
+      const cleanup = await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} worktree remove ${shQuote(mergeDir)} --force`, { cwd: PROJECT_DIR, timeout: 120000, logFile });
+      if (!cleanup.ok) {
+        if (fs.existsSync(mergeDir)) fs.rmSync(mergeDir, { recursive: true, force: true });
+        await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} worktree prune`, { cwd: PROJECT_DIR, timeout: 120000, logFile });
+      }
+    }
     bugAutoMergeRunning = false;
   }
 }
