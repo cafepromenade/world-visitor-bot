@@ -151,6 +151,15 @@ function gitSafe(dir, args) {
   return `git -c safe.directory=${shQuote(path.resolve(dir))} ${args}`;
 }
 
+function gitSafeEnv(dir, baseEnv = process.env) {
+  return {
+    ...baseEnv,
+    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_KEY_0: 'safe.directory',
+    GIT_CONFIG_VALUE_0: path.resolve(dir)
+  };
+}
+
 function run(cmd, quiet) {
   if (!quiet) console.log(`[run] ${cmd}`);
   return new Promise(resolve => {
@@ -1364,7 +1373,8 @@ async function createOrUpdatePullRequest(task, worktree, baseBranch, logFile) {
     appendSession(logFile, '\n[pr] gh is not installed; skipping PR creation.\n');
     return '';
   }
-  let view = await runShellLogged(`gh pr view ${shQuote(task.branch)} --json url --jq .url`, { cwd: worktree, logFile, timeout: 120000 });
+  const ghEnv = gitSafeEnv(worktree);
+  let view = await runShellLogged(`gh pr view ${shQuote(task.branch)} --json url --jq .url`, { cwd: worktree, env: ghEnv, logFile, timeout: 120000 });
   let prUrl = view.ok ? view.stdout.trim() : '';
   const body = [
     `Automated bug watcher repair for ${task.title}.`,
@@ -1379,12 +1389,12 @@ async function createOrUpdatePullRequest(task, worktree, baseBranch, logFile) {
     `Session log: ${task.sessionLog ? path.relative(PROJECT_DIR, task.sessionLog) : 'logs/bug-watcher/sessions'}`
   ].join('\n');
   if (!prUrl) {
-    const create = await runShellLogged(`gh pr create --base ${shQuote(baseBranch)} --head ${shQuote(task.branch)} --title ${shQuote(task.title)} --body ${shQuote(body)}`, { cwd: worktree, logFile, timeout: 180000 });
+    const create = await runShellLogged(`gh pr create --base ${shQuote(baseBranch)} --head ${shQuote(task.branch)} --title ${shQuote(task.title)} --body ${shQuote(body)}`, { cwd: worktree, env: ghEnv, logFile, timeout: 180000 });
     prUrl = create.stdout.trim().split('\n').find(line => /^https?:\/\//.test(line)) || '';
   }
   if (prUrl) {
     const comments = reportCommentsForTask(task).map(c => `- ${c}`).join('\n') || '- None yet';
-      await runShellLogged(`gh pr comment ${shQuote(prUrl)} --body ${shQuote(`Automated watcher update:\n\nCause: ${task.cause || 'detected by validation/report'}\n\nFixed: ${task.summary || 'repair applied'}\n\nBranch: ${task.branch}\n\nPublic report comments:\n${comments}`)}`, { cwd: worktree, logFile, timeout: 120000 });
+    await runShellLogged(`gh pr comment ${shQuote(prUrl)} --body ${shQuote(`Automated watcher update:\n\nCause: ${task.cause || 'detected by validation/report'}\n\nFixed: ${task.summary || 'repair applied'}\n\nBranch: ${task.branch}\n\nPublic report comments:\n${comments}`)}`, { cwd: worktree, env: ghEnv, logFile, timeout: 120000 });
   }
   return prUrl;
 }
