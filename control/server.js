@@ -147,6 +147,10 @@ function shQuote(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 
+function gitSafe(dir, args) {
+  return `git -c safe.directory=${shQuote(path.resolve(dir))} ${args}`;
+}
+
 function run(cmd, quiet) {
   if (!quiet) console.log(`[run] ${cmd}`);
   return new Promise(resolve => {
@@ -1370,7 +1374,7 @@ async function createOrUpdatePullRequest(task, worktree, baseBranch, logFile) {
   }
   if (prUrl) {
     const comments = reportCommentsForTask(task).map(c => `- ${c}`).join('\n') || '- None yet';
-    await runShellLogged(`gh pr comment ${shQuote(prUrl)} --body ${shQuote(`Automated watcher update:\n\nCause: ${task.cause || 'detected by validation/report'}\n\nFixed: ${task.summary || 'repair applied'}\n\nBranch: ${task.branch}\n\nPublic report comments:\n${comments}`)}`, { cwd: worktree, logFile, timeout: 120000 });
+      await runShellLogged(`gh pr comment ${shQuote(prUrl)} --body ${shQuote(`Automated watcher update:\n\nCause: ${task.cause || 'detected by validation/report'}\n\nFixed: ${task.summary || 'repair applied'}\n\nBranch: ${task.branch}\n\nPublic report comments:\n${comments}`)}`, { cwd: worktree, logFile, timeout: 120000 });
   }
   return prUrl;
 }
@@ -1506,11 +1510,11 @@ async function processAutoMerges(ios) {
     result = await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} worktree add --detach ${shQuote(mergeDir)} ${shQuote(`origin/${BUG_WATCHER_MERGE_BRANCH}`)}`, { cwd: PROJECT_DIR, timeout: 180000, logFile });
     if (!result.ok) throw new Error((result.stderr || result.stdout || 'Worktree add failed').slice(-1200));
     await ensureGitSafeDirectory(mergeDir, logFile);
-    result = await runShellLogged(`git merge --no-ff ${shQuote(`origin/${task.branch}`)} -m ${shQuote(`merge: ${task.title}`)}`, { cwd: mergeDir, timeout: 300000, logFile });
+    result = await runShellLogged(gitSafe(mergeDir, `merge --no-ff ${shQuote(`origin/${task.branch}`)} -m ${shQuote(`merge: ${task.title}`)}`), { cwd: mergeDir, timeout: 300000, logFile });
     if (!result.ok) throw new Error((result.stderr || result.stdout || 'Merge failed').slice(-1200));
-    result = await runShellLogged(`git push origin ${shQuote(`HEAD:${BUG_WATCHER_MERGE_BRANCH}`)}`, { cwd: mergeDir, timeout: 300000, logFile });
+    result = await runShellLogged(gitSafe(mergeDir, `push origin ${shQuote(`HEAD:${BUG_WATCHER_MERGE_BRANCH}`)}`), { cwd: mergeDir, timeout: 300000, logFile });
     if (!result.ok) throw new Error((result.stderr || result.stdout || 'Push failed').slice(-1200));
-    await runShellLogged(`git push origin --delete ${shQuote(task.branch)}`, { cwd: mergeDir, timeout: 180000, logFile });
+    await runShellLogged(gitSafe(mergeDir, `push origin --delete ${shQuote(task.branch)}`), { cwd: mergeDir, timeout: 180000, logFile });
     task.mergeStatus = 'merged';
     task.mergedAt = nowIso();
     task.updatedAt = nowIso();
@@ -1666,15 +1670,15 @@ async function processNextBugTask(ios) {
       const artifactFields = { sessionLog: path.relative(PROJECT_DIR, task.sessionLog), agentFile: task.agentFile || '' };
       appendChangelogEntry({ severity: task.severity === 'warning' ? 'warning' : 'fix', title: task.title, summary: task.summary, cause: task.cause, fixed: [task.details.slice(0, 300)], comments, branch: task.branch, ...artifactFields }, worktree);
       appendRuntimeChangelogEntry({ severity: task.severity === 'warning' ? 'warning' : 'fix', title: task.title, summary: task.summary, cause: task.cause, fixed: [task.details.slice(0, 300)], comments, branch: task.branch, ...artifactFields });
-      const status = await runShellLogged('git status --short', { cwd: worktree, logFile: task.sessionLog });
+      const status = await runShellLogged(gitSafe(worktree, 'status --short'), { cwd: worktree, logFile: task.sessionLog });
       if (!status.ok) throw new Error((status.stderr || status.stdout || 'Git status failed').slice(-1200));
       if (status.stdout.trim()) {
-        let result = await runShellLogged('git add -A', { cwd: worktree, logFile: task.sessionLog });
+        let result = await runShellLogged(gitSafe(worktree, 'add -A'), { cwd: worktree, logFile: task.sessionLog });
         if (!result.ok) throw new Error((result.stderr || result.stdout || 'Git add failed').slice(-1200));
-        result = await runShellLogged(`git -c user.name=${shQuote(process.env.GIT_AUTHOR_NAME || 'Overworld Visitor Bot')} -c user.email=${shQuote(process.env.GIT_AUTHOR_EMAIL || 'overworld-visitor-bot@example.invalid')} commit -m ${shQuote(`fix: auto repair ${task.title}`)}`, { cwd: worktree, logFile: task.sessionLog, timeout: 180000 });
+        result = await runShellLogged(`git -c safe.directory=${shQuote(path.resolve(worktree))} -c user.name=${shQuote(process.env.GIT_AUTHOR_NAME || 'Overworld Visitor Bot')} -c user.email=${shQuote(process.env.GIT_AUTHOR_EMAIL || 'overworld-visitor-bot@example.invalid')} commit -m ${shQuote(`fix: auto repair ${task.title}`)}`, { cwd: worktree, logFile: task.sessionLog, timeout: 180000 });
         if (!result.ok) throw new Error((result.stderr || result.stdout || 'Git commit failed').slice(-1200));
         if (OPENCODE_AUTO_PUSH) {
-          result = await runShellLogged(`git push -u origin ${shQuote(task.branch)}`, { cwd: worktree, logFile: task.sessionLog, timeout: 300000 });
+          result = await runShellLogged(gitSafe(worktree, `push -u origin ${shQuote(task.branch)}`), { cwd: worktree, logFile: task.sessionLog, timeout: 300000 });
           if (!result.ok) throw new Error((result.stderr || result.stdout || 'Git push failed').slice(-1200));
         }
         task.prUrl = await createOrUpdatePullRequest(task, worktree, baseBranch, task.sessionLog);
