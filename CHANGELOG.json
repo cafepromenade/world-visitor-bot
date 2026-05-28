@@ -1,5 +1,25 @@
 [
   {
+    "date": "2026-05-28T16:49:00.000Z",
+    "severity": "fix",
+    "title": "Bug watcher task visibility and auto-fix recovery",
+    "summary": "Hardened automated repair worktrees against Git safe-directory failures and made watcher tasks easier to read, color-coded, animated, and exportable from the site.",
+    "cause": "A reported auto-fix task failed after Git rejected the watcher worktree as dubious ownership, and user feedback said the task text was too small and not visibly color-coded.",
+    "fixed": [
+      "Auto-fix and auto-merge worktrees are added to Git safe.directory before validation, commit, push, or merge operations.",
+      "Watcher task cards now use larger readable text, severity-colored borders, animated queued/running states, and expanded details.",
+      "Generated agent prompts and session logs are exposed as downloadable artifacts when available."
+    ],
+    "features": [
+      "Changelog entries can link to exported watcher logs and generated agent prompt files."
+    ],
+    "comments": [
+      "How it should improve: failed watcher tasks caused by safe-directory ownership checks can be retried without hitting the same Git blocker, and users can inspect richer task context directly from the website."
+    ],
+    "branch": "main",
+    "prUrl": ""
+  },
+  {
     "date": "2026-05-21T22:27:33.773Z",
     "severity": "fix",
     "title": "Batch: 2 queued fixes",

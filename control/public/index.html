@@ -142,13 +142,27 @@ body{font-family:'Google Sans','Inter',sans-serif;background:var(--bg);color:var
 
 .state-mgr{border:1px dashed var(--border);border-radius:var(--radius);padding:14px;margin-top:8px}
 .state-mgr textarea{width:100%;height:120px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font:400 .7rem 'Google Sans Mono',monospace;padding:10px;resize:vertical}
-.severity{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:.62rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.severity{display:inline-flex;align-items:center;padding:3px 9px;border-radius:999px;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
 .severity-critical,.severity-error{background:var(--red)22;color:var(--red);border:1px solid var(--red)55}
 .severity-warning{background:var(--yellow)22;color:var(--yellow);border:1px solid var(--yellow)55}
 .severity-fix{background:var(--green)22;color:var(--green);border:1px solid var(--green)55}
 .severity-feature{background:var(--primary)22;color:var(--primary);border:1px solid var(--primary)55}
-.change-card,.watcher-task{border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;margin-bottom:8px;background:rgba(0,0,0,.13)}
-.change-title{font-size:.82rem;font-weight:500;margin:6px 0}
+.change-card,.watcher-task{border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px;background:rgba(0,0,0,.13)}
+.watcher-task{position:relative;overflow:hidden;border-left:4px solid var(--primary)}
+.watcher-task::before{content:'';position:absolute;inset:0 100% 0 0;background:rgba(255,255,255,.05);pointer-events:none}
+.watcher-task.status-running::before,.watcher-task.status-queued::before,.watcher-task.status-retry::before{animation:taskSweep 2.4s linear infinite}
+.watcher-task.sev-critical,.watcher-task.sev-error{border-left-color:var(--red);background:var(--red)08}
+.watcher-task.sev-warning{border-left-color:var(--yellow);background:var(--yellow)08}
+.watcher-task.sev-feature{border-left-color:var(--primary);background:var(--primary)08}
+.watcher-task.sev-fix,.watcher-task.status-completed,.watcher-task.status-merged{border-left-color:var(--green);background:var(--green)08}
+.watcher-task.status-failed{border-left-color:var(--red);box-shadow:0 0 0 1px var(--red)22 inset}
+@keyframes taskSweep{0%{inset:0 100% 0 0}50%{inset:0 0 0 0}100%{inset:0 0 0 100%}}
+.change-card .card-sub,.watcher-task .card-sub{font-size:.74rem;line-height:1.55;color:var(--text2)}
+.change-title{font-size:.92rem;font-weight:700;margin:7px 0;color:var(--text)}
+.artifact-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.artifact-link{display:inline-flex;align-items:center;padding:4px 9px;border:1px solid var(--border);border-radius:999px;color:var(--primary);text-decoration:none;font-size:.72rem;font-weight:600;background:rgba(255,255,255,.04)}
+.artifact-link:hover{border-color:var(--primary);background:var(--primary)16}
+.task-details{margin-top:7px;padding:8px;border:1px solid var(--border);border-radius:8px;background:rgba(0,0,0,.12);font-size:.72rem;line-height:1.55;color:var(--text2);white-space:pre-wrap;max-height:160px;overflow:auto}
 .drop-zone{border:1px dashed var(--accent);border-radius:var(--radius);padding:18px;text-align:center;background:var(--accent)10;color:var(--text2);cursor:pointer;transition:var(--t)}
 .drop-zone.drag{background:var(--accent)22;color:var(--text)}
 .upload-progress{height:20px;background:var(--bg);border-radius:10px;overflow:hidden;margin-top:10px}
@@ -776,6 +790,15 @@ function exportLogs(tab){
 }
 
 function severityClass(s){s=String(s||'feature').toLowerCase();return 'severity severity-'+(s==='critical'?'critical':s==='error'?'error':s==='warning'?'warning':s==='fix'?'fix':'feature')}
+function taskClass(t){const sev=String(t.severity||'feature').toLowerCase();const status=String(t.status||'queued').toLowerCase();return 'watcher-task sev-'+(sev==='critical'?'critical':sev==='error'?'error':sev==='warning'?'warning':sev==='fix'?'fix':'feature')+' status-'+status}
+function artifactUrl(file){return '/api/bug-artifact?file='+encodeURIComponent(file)}
+function artifactLinks(item){
+  const links=[];
+  if(item.sessionLog)links.push('<a class="artifact-link" href="'+artifactUrl(item.sessionLog)+'" download>Export log</a>');
+  if(item.agentFile)links.push('<a class="artifact-link" href="'+artifactUrl(item.agentFile)+'" download>Export agent prompt</a>');
+  return links.length?'<div class="artifact-row">'+links.join('')+'</div>':'';
+}
+function detailBlock(text){return text?'<div class="task-details">'+he(text)+'</div>':''}
 function fmtDate(value){return value?new Date(value).toLocaleString('en-CA',{timeZone:TORONTO_TZ,hour12:false,timeZoneName:'short'}):'unknown'}
 function fmtMs(ms){
   ms=Math.max(0,Number(ms)||0);
@@ -831,7 +854,7 @@ function renderWatcherStatus(data){
   const cur=data.current;
   const flags='<div class="card-sub">Auto fix '+(data.autoFix?'on':'off')+' - processor '+he(data.processor||'opencode --prompt')+' - queued '+(data.queue||[]).length+' - max attempts '+(data.maxAttempts||5)+' - retry every '+fmtMs(data.retryDelayMs||1800000)+' - warnings are '+(data.treatWarningsAsErrors?'small errors':'informational')+' - auto-merge '+(data.autoMerge?'on':'off')+' after '+fmtMs(data.autoMergeMs||0)+'</div>';
   const allActions='<div style="display:flex;gap:8px;margin:8px 0;flex-wrap:wrap"><button class="btn btn-t btn-sm" onclick="processAllBugTasks()">Process All Tasks Now</button><button class="btn btn-o btn-sm" onclick="runWatcherCheck()">Run Checks</button></div>';
-  const taskCard=(t,actions)=>'<div class="watcher-task"><span class="'+severityClass(t.severity)+'">'+he(t.severity)+'</span><div class="change-title">'+he(t.title)+'</div><div class="card-sub">'+he(t.status)+' - '+he(t.branch)+' - attempt '+he(t.attempts||0)+'</div><div class="card-sub">'+he(taskMeta(t))+'</div>'+(t.summary?'<div class="card-sub">Summary: '+he(t.summary)+'</div>':'')+(actions||'')+'</div>';
+  const taskCard=(t,actions)=>'<div class="'+taskClass(t)+'"><span class="'+severityClass(t.severity)+'">'+he(t.severity)+'</span><div class="change-title">'+he(t.title)+'</div><div class="card-sub">'+he(t.status)+' - '+he(t.branch)+' - attempt '+he(t.attempts||0)+'</div><div class="card-sub">'+he(taskMeta(t))+'</div>'+(t.summary?'<div class="card-sub">Summary: '+he(t.summary)+'</div>':'')+(t.cause?'<div class="card-sub">Cause: '+he(t.cause)+'</div>':'')+artifactLinks(t)+detailBlock(t.details)+(actions||'')+'</div>';
   const current=cur?taskCard(cur,'<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"><button class="btn btn-o btn-sm btn-danger" onclick="removeQueueTask(\''+he(cur.id)+'\')">Cancel Task</button></div>'):'<div class="card-sub">No task is currently running.</div>';
   const queue=(data.queue||[]).slice(0,12).map(t=>taskCard(t,'<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"><button class="btn btn-t btn-sm" onclick="retryQueuedTask(\''+he(t.id)+'\')">Retry Now</button><button class="btn btn-o btn-sm btn-danger" onclick="removeQueueTask(\''+he(t.id)+'\')">Remove from Queue</button></div>')).join('')||'<div class="card-sub">Queue is empty.</div>';
   const pending=(data.completed||[]).filter(t=>t.mergeStatus&&t.mergeStatus!=='merged').slice(0,8).map(t=>taskCard(t,'<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"><button class="btn btn-t btn-sm" onclick="retryFailedTask(\''+he(t.id)+'\')">Retry Task</button><button class="btn btn-o btn-sm btn-danger" onclick="rejectAutoMerge(\''+he(t.id)+'\')">Reject Auto-Merge</button></div>')).join('')||'<div class="card-sub">No fixes waiting for merge.</div>';
@@ -845,7 +868,7 @@ function renderWatcherStatus(data){
   const reports=(data.reports||[]).slice(0,5).map(r=>{
     const comments=(r.comments||[]).slice(-3).map(c=>'<div class="card-sub">Comment: '+he(c.message)+' <small>'+fmtDate(c.at)+'</small></div>').join('');
     const id=he(r.id);
-    return '<div class="watcher-task"><span class="'+severityClass(r.severity)+'">'+he(r.severity)+'</span><div class="change-title">'+he(r.title)+'</div><div class="card-sub">'+fmtDate(r.createdAt)+' - '+he(r.status||'queued')+' - '+he(r.approval||'')+' - IPv4 '+he(r.publicIpv4||r.observedIpv4||'unknown')+'</div>'+comments+'<div class="cmd-box"><input class="cmd-input" id="bug-comment-'+id+'" placeholder="Add public feedback/comment"><button class="btn btn-t btn-sm" onclick="submitReportComment(\''+id+'\')">Comment</button></div></div>';
+    return '<div class="'+taskClass(r)+'"><span class="'+severityClass(r.severity)+'">'+he(r.severity)+'</span><div class="change-title">'+he(r.title)+'</div><div class="card-sub">'+fmtDate(r.createdAt)+' - '+he(r.status||'queued')+' - '+he(r.approval||'')+' - IPv4 '+he(r.publicIpv4||r.observedIpv4||'unknown')+'</div>'+(r.summary?'<div class="card-sub">Summary: '+he(r.summary)+'</div>':'')+artifactLinks(r)+comments+'<div class="cmd-box"><input class="cmd-input" id="bug-comment-'+id+'" placeholder="Add public feedback/comment"><button class="btn btn-t btn-sm" onclick="submitReportComment(\''+id+'\')">Comment</button></div></div>';
   }).join('');
   $('watcher-status').innerHTML=flags+allActions+'<div class="change-title">Task In Progress</div>'+current+'<div class="change-title">Processing Queue</div>'+queue+'<div class="change-title">Pending Merge / Finished Fixes</div>'+pending+'<div class="change-title">Failed Tasks</div>'+failedToolbar+failed+'<div class="change-title">Merged Fixes</div>'+merged+(reports?'<div class="change-title">Recent Reports</div>'+reports:'')+'<div class="card-sub">Last check: '+fmtDate(data.lastCheckAt)+' '+(data.lastCheckLog?' - '+he(data.lastCheckLog):'')+'</div>';
   Object.entries(oldValues).forEach(([id,value])=>{const el=$(id); if(el)el.value=value});
@@ -953,7 +976,7 @@ function renderChangelog(items){
     const features=(item.features||[]).map(x=>'<div class="card-sub">Feature: '+he(x)+'</div>').join('');
     const comments=(item.comments||[]).map(x=>'<div class="card-sub">Comment: '+he(x)+'</div>').join('');
     const pr=item.prUrl?'<div class="card-sub"><a style="color:var(--primary)" href="'+he(item.prUrl)+'" target="_blank" rel="noopener">Pull request</a></div>':'';
-    return '<div class="change-card"><span class="'+severityClass(item.severity)+'">'+he(item.severity||'feature')+'</span><div class="change-title">'+he(item.title||'Update')+'</div><div class="card-sub">'+fmtDate(item.date)+'</div><div class="card-sub" style="margin-top:6px">Summary: '+he(item.summary||'No summary')+'</div><div class="card-sub">Cause: '+he(item.cause||'Not recorded')+'</div>'+fixed+features+comments+pr+'</div>';
+    return '<div class="change-card"><span class="'+severityClass(item.severity)+'">'+he(item.severity||'feature')+'</span><div class="change-title">'+he(item.title||'Update')+'</div><div class="card-sub">'+fmtDate(item.date)+'</div><div class="card-sub" style="margin-top:6px">Summary: '+he(item.summary||'No summary')+'</div><div class="card-sub">Cause: '+he(item.cause||'Not recorded')+'</div>'+fixed+features+comments+artifactLinks(item)+pr+'</div>';
   }).join('');
 }
 

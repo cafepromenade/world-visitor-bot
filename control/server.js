@@ -184,6 +184,14 @@ async function runShellLogged(cmd, options = {}) {
   return result;
 }
 
+async function ensureGitSafeDirectory(dir, logFile = '') {
+  const full = path.resolve(dir);
+  const list = await runShellLogged('git config --global --get-all safe.directory', { cwd: PROJECT_DIR, timeout: 30000, logFile });
+  const known = list.stdout.split(/\r?\n/).map(line => path.resolve(line.trim())).filter(Boolean);
+  if (known.includes(full)) return;
+  await runShellLogged(`git config --global --add safe.directory ${shQuote(full)}`, { cwd: PROJECT_DIR, timeout: 30000, logFile });
+}
+
 function spawnLogged(command, args, options = {}) {
   const logFile = options.logFile;
   if (logFile) appendSession(logFile, `\n$ ${[command, ...args].map(shQuote).join(' ')}\n`);
@@ -602,6 +610,7 @@ function publicBugTask(task, estimate = {}) {
     estimatedResolvedAt: estimate.estimatedResolvedAt || '',
     estimatedSeconds: estimate.estimatedSeconds || 0,
     sessionLog: task.sessionLog ? path.relative(PROJECT_DIR, task.sessionLog) : '',
+    agentFile: task.agentFile || '',
     details: String(task.details || '').slice(0, 1800)
   };
 }
@@ -622,6 +631,7 @@ function publicBugReport(report, task = findAnyTaskById(report?.taskId)) {
     branch: report.branch || '',
     prUrl: report.prUrl || '',
     sessionLog: report.sessionLog || '',
+    agentFile: report.agentFile || '',
     cause: report.cause || '',
     summary: report.summary || '',
     mergeStatus: report.mergeStatus || '',
@@ -761,6 +771,7 @@ function updateReportsForTask(task, status, updates = {}) {
       branch: task.branch,
       prUrl: task.prUrl || '',
       sessionLog: task.sessionLog ? path.relative(PROJECT_DIR, task.sessionLog) : '',
+      agentFile: task.agentFile || '',
       cause: task.cause || '',
       summary: task.summary || '',
       attempts: task.attempts || 0,
@@ -823,7 +834,9 @@ function appendChangelogEntry(entry, dir = PROJECT_DIR) {
     features: Array.isArray(entry.features) ? entry.features : [],
     comments: Array.isArray(entry.comments) ? entry.comments : [],
     branch: entry.branch || '',
-    prUrl: entry.prUrl || ''
+    prUrl: entry.prUrl || '',
+    sessionLog: entry.sessionLog || '',
+    agentFile: entry.agentFile || ''
   };
   const next = [item, ...list].slice(0, 200);
   writeJson(file, next);
@@ -844,7 +857,9 @@ function appendRuntimeChangelogEntry(entry) {
     features: Array.isArray(entry.features) ? entry.features : [],
     comments: Array.isArray(entry.comments) ? entry.comments : [],
     branch: entry.branch || '',
-    prUrl: entry.prUrl || ''
+    prUrl: entry.prUrl || '',
+    sessionLog: entry.sessionLog || '',
+    agentFile: entry.agentFile || ''
   };
   writeJson(file, [item, ...list].slice(0, 500));
   return item;
@@ -1087,6 +1102,15 @@ function setting(settings, current, key, fallback) {
   return settings[key] ?? current[key] ?? fallback;
 }
 
+function bugArtifactPath(file) {
+  const rel = String(file || '').replace(/\\/g, '/');
+  if (!rel.startsWith('logs/bug-watcher/sessions/')) return '';
+  const full = path.resolve(PROJECT_DIR, rel);
+  const base = path.resolve(bugSessionsDir);
+  if (full !== base && full.startsWith(`${base}${path.sep}`) && fs.existsSync(full)) return full;
+  return '';
+}
+
 function normalizeFollowPlayers(value) {
   return [...new Set(String(value || '')
     .split(/[,\n\r\t ]+/)
@@ -1189,6 +1213,7 @@ function uiScriptCheckCommand() {
 }
 
 async function runBugChecks(dir = PROJECT_DIR, logFile = '') {
+  await ensureGitSafeDirectory(dir, logFile);
   const env = { ...process.env, HOST_PROJECT_DIR: dir, COMPOSE_PROJECT_NAME: `${COMPOSE_PROJECT}-check` };
   const checks = [
     { name: 'Control server syntax', severity: 'error', cmd: 'node --check control/server.js' },
@@ -1249,6 +1274,7 @@ async function ensureBugWorktree(task, logFile) {
   ensureDir(bugWorktreesDir);
   await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} worktree prune --expire now`, { cwd: PROJECT_DIR, logFile, timeout: 120000 });
   if (fs.existsSync(path.join(worktree, '.git'))) {
+    await ensureGitSafeDirectory(worktree, logFile);
     const current = await runShell(`git -c safe.directory=${shQuote(worktree)} rev-parse --abbrev-ref HEAD`, { cwd: worktree, timeout: 120000 });
     if (current.ok && current.stdout.trim() === task.branch) {
       await runShellLogged(`git -c safe.directory=${shQuote(worktree)} merge --no-edit ${shQuote(baseBranch)}`, { cwd: worktree, logFile, timeout: 300000 });
@@ -1261,6 +1287,7 @@ async function ensureBugWorktree(task, logFile) {
     ? await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} worktree add --force ${shQuote(worktree)} ${shQuote(task.branch)}`, { cwd: PROJECT_DIR, logFile, timeout: 180000 })
     : await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} worktree add -b ${shQuote(task.branch)} ${shQuote(worktree)} ${shQuote(baseBranch)}`, { cwd: PROJECT_DIR, logFile, timeout: 180000 });
   if (!result.ok) throw new Error(`Unable to create worktree for ${task.branch}`);
+  await ensureGitSafeDirectory(worktree, logFile);
   if (branchExists.ok) await runShellLogged(`git -c safe.directory=${shQuote(worktree)} merge --no-edit ${shQuote(baseBranch)}`, { cwd: worktree, logFile, timeout: 300000 });
   return { worktree, baseBranch };
 }
@@ -1478,6 +1505,7 @@ async function processAutoMerges(ios) {
     if (!result.ok) throw new Error((result.stderr || result.stdout || 'Worktree prune failed').slice(-1200));
     result = await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} worktree add --detach ${shQuote(mergeDir)} ${shQuote(`origin/${BUG_WATCHER_MERGE_BRANCH}`)}`, { cwd: PROJECT_DIR, timeout: 180000, logFile });
     if (!result.ok) throw new Error((result.stderr || result.stdout || 'Worktree add failed').slice(-1200));
+    await ensureGitSafeDirectory(mergeDir, logFile);
     result = await runShellLogged(`git merge --no-ff ${shQuote(`origin/${task.branch}`)} -m ${shQuote(`merge: ${task.title}`)}`, { cwd: mergeDir, timeout: 300000, logFile });
     if (!result.ok) throw new Error((result.stderr || result.stdout || 'Merge failed').slice(-1200));
     result = await runShellLogged(`git push origin ${shQuote(`HEAD:${BUG_WATCHER_MERGE_BRANCH}`)}`, { cwd: mergeDir, timeout: 300000, logFile });
@@ -1605,6 +1633,10 @@ async function processNextBugTask(ios) {
     const { worktree, baseBranch } = await ensureBugWorktree(task, task.sessionLog);
     if (finishIfCancelled()) return;
     const prompt = buildAutofixPrompt(task, baseBranch);
+    const promptFile = path.join(bugSessionsDir, `${task.id}-agent-prompt-${sessionStamp()}.txt`);
+    ensureDir(path.dirname(promptFile));
+    fs.writeFileSync(promptFile, prompt);
+    task.agentFile = path.relative(PROJECT_DIR, promptFile);
     const args = [worktree, '--prompt', prompt];
     if (OPENCODE_SKIP_PERMISSIONS) appendSession(task.sessionLog, '\n[opencode] --dangerously-skip-permissions is only available on opencode run; using opencode --prompt without that flag.\n');
     const opencodeResult = await spawnLogged(resolveOpenCodeCommand(), args, {
@@ -1631,8 +1663,9 @@ async function processNextBugTask(ios) {
         `How it went: automated opencode ran non-interactively on ${task.branch} and validation passed.`,
         'How it should improve: add or keep regression coverage for this signature so the watcher catches repeat issues sooner.'
       ];
-      appendChangelogEntry({ severity: task.severity === 'warning' ? 'warning' : 'fix', title: task.title, summary: task.summary, cause: task.cause, fixed: [task.details.slice(0, 300)], comments, branch: task.branch }, worktree);
-      appendRuntimeChangelogEntry({ severity: task.severity === 'warning' ? 'warning' : 'fix', title: task.title, summary: task.summary, cause: task.cause, fixed: [task.details.slice(0, 300)], comments, branch: task.branch });
+      const artifactFields = { sessionLog: path.relative(PROJECT_DIR, task.sessionLog), agentFile: task.agentFile || '' };
+      appendChangelogEntry({ severity: task.severity === 'warning' ? 'warning' : 'fix', title: task.title, summary: task.summary, cause: task.cause, fixed: [task.details.slice(0, 300)], comments, branch: task.branch, ...artifactFields }, worktree);
+      appendRuntimeChangelogEntry({ severity: task.severity === 'warning' ? 'warning' : 'fix', title: task.title, summary: task.summary, cause: task.cause, fixed: [task.details.slice(0, 300)], comments, branch: task.branch, ...artifactFields });
       const status = await runShellLogged('git status --short', { cwd: worktree, logFile: task.sessionLog });
       if (!status.ok) throw new Error((status.stderr || status.stdout || 'Git status failed').slice(-1200));
       if (status.stdout.trim()) {
@@ -2003,6 +2036,11 @@ function mountRoutes(app, ios) {
   });
   app.get('/api/env', (req, res) => res.json(readEnv()));
   app.get('/api/changelog', (req, res) => res.json(readChangelog()));
+  app.get('/api/bug-artifact', (req, res) => {
+    const full = bugArtifactPath(req.query.file);
+    if (!full) return res.status(404).send('Artifact not found');
+    res.download(full, path.basename(full));
+  });
   app.get('/api/bug-watcher', (req, res) => res.json(getBugWatcherPublicStatus()));
   app.post('/api/bug-watcher/check', async (req, res) => {
     try {
