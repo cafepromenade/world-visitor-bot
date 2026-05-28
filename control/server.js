@@ -1279,20 +1279,30 @@ async function ensureBugWorktree(task, logFile) {
   await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} worktree prune --expire now`, { cwd: PROJECT_DIR, logFile, timeout: 120000 });
   if (fs.existsSync(path.join(worktree, '.git'))) {
     await ensureGitSafeDirectory(worktree, logFile);
-    const current = await runShell(`git -c safe.directory=${shQuote(worktree)} rev-parse --abbrev-ref HEAD`, { cwd: worktree, timeout: 120000 });
+    const current = await runShell(gitSafe(worktree, 'rev-parse --abbrev-ref HEAD'), { cwd: worktree, timeout: 120000 });
     if (current.ok && current.stdout.trim() === task.branch) {
-      await runShellLogged(`git -c safe.directory=${shQuote(worktree)} merge --no-edit ${shQuote(baseBranch)}`, { cwd: worktree, logFile, timeout: 300000 });
-      return { worktree, baseBranch };
+      await runShellLogged(gitSafe(worktree, 'reset --hard'), { cwd: worktree, logFile, timeout: 120000 });
+      await runShellLogged(gitSafe(worktree, 'clean -fd'), { cwd: worktree, logFile, timeout: 120000 });
+      const merge = await runShellLogged(gitSafe(worktree, `merge --no-edit ${shQuote(baseBranch)}`), { cwd: worktree, logFile, timeout: 300000 });
+      if (merge.ok) return { worktree, baseBranch };
     }
   }
-  if (fs.existsSync(worktree)) fs.rmSync(worktree, { recursive: true, force: true });
+  if (fs.existsSync(worktree)) {
+    fs.rmSync(worktree, { recursive: true, force: true });
+    await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} worktree prune --expire now`, { cwd: PROJECT_DIR, logFile, timeout: 120000 });
+  }
   const branchExists = await runShell(`git -c safe.directory=${shQuote(PROJECT_DIR)} rev-parse --verify ${shQuote(task.branch)} 2>/dev/null`, { cwd: PROJECT_DIR, timeout: 120000 });
   let result = branchExists.ok
     ? await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} worktree add --force ${shQuote(worktree)} ${shQuote(task.branch)}`, { cwd: PROJECT_DIR, logFile, timeout: 180000 })
     : await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} worktree add -b ${shQuote(task.branch)} ${shQuote(worktree)} ${shQuote(baseBranch)}`, { cwd: PROJECT_DIR, logFile, timeout: 180000 });
   if (!result.ok) throw new Error(`Unable to create worktree for ${task.branch}`);
   await ensureGitSafeDirectory(worktree, logFile);
-  if (branchExists.ok) await runShellLogged(`git -c safe.directory=${shQuote(worktree)} merge --no-edit ${shQuote(baseBranch)}`, { cwd: worktree, logFile, timeout: 300000 });
+  if (branchExists.ok) {
+    await runShellLogged(gitSafe(worktree, 'reset --hard'), { cwd: worktree, logFile, timeout: 120000 });
+    await runShellLogged(gitSafe(worktree, 'clean -fd'), { cwd: worktree, logFile, timeout: 120000 });
+    result = await runShellLogged(gitSafe(worktree, `merge --no-edit ${shQuote(baseBranch)}`), { cwd: worktree, logFile, timeout: 300000 });
+    if (!result.ok) throw new Error((result.stderr || result.stdout || `Unable to merge ${baseBranch} into ${task.branch}`).slice(-1200));
+  }
   return { worktree, baseBranch };
 }
 
