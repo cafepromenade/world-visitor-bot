@@ -190,24 +190,24 @@ async function runShellLogged(cmd, options = {}) {
 
 async function ensureGitSafeDirectory(dir, logFile = '') {
   const full = path.resolve(dir);
-  const list = await runShellLogged('git config --global --get-all safe.directory', { cwd: PROJECT_DIR, timeout: 30000, logFile });
+  const list = await runShell('git config --global --get-all safe.directory', { cwd: PROJECT_DIR, timeout: 30000 });
   const known = list.stdout.split(/\r?\n/).map(line => path.resolve(line.trim())).filter(Boolean);
   if (known.includes(full)) return;
-  await runShellLogged(`git config --global --add safe.directory ${shQuote(full)}`, { cwd: PROJECT_DIR, timeout: 30000, logFile });
+  const add = await runShell(`git config --global --add safe.directory ${shQuote(full)}`, { cwd: PROJECT_DIR, timeout: 30000 });
+  if (!add.ok && logFile) appendSession(logFile, `\n[git] global safe.directory is not writable for ${full}; per-command safe.directory will be used.\n`);
 }
 
 function spawnLogged(command, args, options = {}) {
   const logFile = options.logFile;
   if (logFile) appendSession(logFile, `\n$ ${[command, ...args].map(shQuote).join(' ')}\n`);
   return new Promise(resolve => {
-    const child = spawn(command, args, { cwd: options.cwd || PROJECT_DIR, env: options.env || process.env, shell: false, detached: true });
+    const child = spawn(command, args, { cwd: options.cwd || PROJECT_DIR, env: options.env || process.env, shell: false, detached: false });
     if (options.onChild) options.onChild(child);
     let output = '';
     let timedOut = false;
     let killTimer = null;
     const killChild = signal => {
-      try { process.kill(-child.pid, signal); }
-      catch { try { child.kill(signal); } catch {} }
+      try { child.kill(signal); } catch {}
     };
     const onData = data => {
       const text = data.toString();
