@@ -1,5 +1,24 @@
 [
   {
+    "date": "2026-05-28T19:24:01.460Z",
+    "severity": "fix",
+    "title": "Bots should start exploring at 0,0",
+    "summary": "Automated repair completed and validation passed for Bots should start exploring at 0,0.",
+    "cause": "A site bug report or user report queued this repair.",
+    "fixed": [
+      "The bots don’t start at 0,0\n\nPage: http://bigheados.com:3000/\nUser-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 26_5_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/148.0.7778.166 Mobile/15E148 Safari/604.1\nPublic IPv4: 24.114.59.124\nObserved IPv4: 24.114.59.124\n\nopencode --prompt timed"
+    ],
+    "features": [],
+    "comments": [
+      "How it went: automated opencode ran non-interactively on autofix/bots-should-start-exploring-at-0-0-c2e7da658e and validation passed.",
+      "How it should improve: add or keep regression coverage for this signature so the watcher catches repeat issues sooner."
+    ],
+    "branch": "autofix/bots-should-start-exploring-at-0-0-c2e7da658e",
+    "prUrl": "",
+    "sessionLog": "logs/bug-watcher/sessions/1779995937643-c2e7da658e-attempt-1-2026-05-28T19-18-57-655Z.log",
+    "agentFile": "logs/bug-watcher/sessions/1779995937643-c2e7da658e-agent-prompt-2026-05-28T19-18-57-817Z.txt"
+  },
+  {
     "date": "2026-05-28T17:23:49.289Z",
     "severity": "fix",
     "title": "Feedback: Color code tasks",
