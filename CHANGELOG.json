@@ -19,6 +19,24 @@
     "agentFile": "logs/bug-watcher/sessions/1779995937643-c2e7da658e-agent-prompt-2026-05-28T19-18-57-817Z.txt"
   },
   {
+    "date": "2026-05-29T03:10:16.000Z",
+    "severity": "feature",
+    "title": "Direct-push website repair workflow",
+    "summary": "Changed automated website bug and feature repairs to validate in a detached scratch worktree, push directly to main, and redeploy the website without creating new feature branches or PRs.",
+    "cause": "Feature requests should be processed directly on main and deployed immediately instead of creating new git branches for the user to merge later.",
+    "fixed": [
+      "Bug watcher tasks now target main in direct-push mode instead of generating autofix branches.",
+      "Validated fixes push with git push origin HEAD:main and then trigger the existing website rebuild/restart path.",
+      "The watcher status UI now labels the mode as direct push and describes tasks as targeting main rather than waiting on branch auto-merge."
+    ],
+    "features": [],
+    "comments": [
+      "How it should improve: future feature requests and bug reports should land on main and deploy without a branch/PR handoff."
+    ],
+    "branch": "main",
+    "prUrl": ""
+  },
+  {
     "date": "2026-05-28T17:23:49.289Z",
     "severity": "fix",
     "title": "Feedback: Color code tasks",

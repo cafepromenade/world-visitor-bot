@@ -44,6 +44,7 @@ const OPENCODE_AUTO_PR = envFlag('OPENCODE_AUTO_PR', true);
 const OPENCODE_AUTO_PUSH = envFlag('OPENCODE_AUTO_PUSH', true);
 const OPENCODE_CMD = process.env.OPENCODE_CMD || 'opencode';
 const OPENCODE_TIMEOUT_MS = Math.max(60000, parseInt(process.env.OPENCODE_TIMEOUT_MS || '1800000', 10) || 1800000);
+const BUG_WATCHER_DIRECT_PUSH = envFlag('BUG_WATCHER_DIRECT_PUSH', true);
 const BUG_WATCHER_AUTO_MERGE = envFlag('BUG_WATCHER_AUTO_MERGE', true);
 const BUG_WATCHER_AUTO_MERGE_MS = Math.max(60000, parseInt(process.env.BUG_WATCHER_AUTO_MERGE_MS || '300000', 10) || 300000);
 const BUG_WATCHER_MERGE_BRANCH = process.env.BUG_WATCHER_MERGE_BRANCH || 'main';
@@ -289,7 +290,7 @@ async function commandExists(bin) {
 
 async function installMissingDependencies() {
   const required = ['git', 'node', 'npm', 'docker', 'unzip'];
-  if (OPENCODE_AUTO_PR) required.push('gh');
+  if (OPENCODE_AUTO_PR && !BUG_WATCHER_DIRECT_PUSH) required.push('gh');
   if (OPENCODE_ALLOW_SUDO && process.getuid && process.getuid() !== 0) required.push('sudo');
   const missing = [];
   for (const bin of required) if (!(await commandExists(bin))) missing.push(bin);
@@ -386,6 +387,16 @@ function safeBranchName(value, fallback = 'task') {
 
 function normalizeTaskBranch(task) {
   if (!task) return;
+  if (BUG_WATCHER_DIRECT_PUSH) {
+    const previous = task.branch;
+    task.branch = BUG_WATCHER_MERGE_BRANCH;
+    for (const reportId of task.reportIds || []) {
+      const report = bugWatcherState.reports.find(r => r.id === reportId);
+      if (!report) continue;
+      if (!report.branch || report.branch === previous || String(report.branch).startsWith('autofix/')) report.branch = task.branch;
+    }
+    return;
+  }
   const fallback = `${task.title || 'task'}-${hashText(task.signature || task.id || task.title || 'task').slice(0, 10)}`;
   const next = safeBranchName(task.branch || `autofix/${safeSlug(fallback)}`, fallback);
   if (task.branch === next) return;
@@ -480,7 +491,7 @@ function dedupeBugQueue() {
     existing.updatedAt = nowIso();
     for (const reportId of task.reportIds || []) {
       updateReport(reportId, { taskId: existing.id, branch: existing.branch, status: existing.status || 'queued' });
-      addReportComment(reportId, `Merged into related queued task ${existing.id} on branch ${existing.branch}.`, 'info');
+      addReportComment(reportId, `Merged into related queued task ${existing.id} for direct push to ${existing.branch}.`, 'info');
     }
   }
   bugWatcherState.queue = next;
@@ -502,7 +513,9 @@ function mergeQueuedTasksIntoBatch() {
     batch.source = 'batch';
     batch.title = `Batch: ${candidates.length} queued fixes`;
     batch.signature = `batch:${Date.now()}:${hashText(candidates.map(t => t.id).join('|')).slice(0, 8)}`;
-    batch.branch = `autofix/batch-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${hashText(candidates.map(t => t.branch).join('|')).slice(0, 8)}`;
+    batch.branch = BUG_WATCHER_DIRECT_PUSH
+      ? BUG_WATCHER_MERGE_BRANCH
+      : `autofix/batch-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${hashText(candidates.map(t => t.branch).join('|')).slice(0, 8)}`;
     batch.status = 'queued';
   }
   const merged = [batch, ...candidates.filter(t => t.id !== batch.id)];
@@ -516,7 +529,7 @@ function mergeQueuedTasksIntoBatch() {
     `Task ${t.id}: ${t.title}`,
     `Severity: ${t.severity}`,
     `Source: ${t.source}`,
-    `Original branch: ${t.branch}`,
+    `Original target: ${t.branch}`,
     '',
     t.details || ''
   ].join('\n')).join('\n\n---\n\n').slice(-24000);
@@ -524,7 +537,7 @@ function mergeQueuedTasksIntoBatch() {
   for (const task of merged) {
     for (const reportId of task.reportIds || []) {
       updateReport(reportId, { taskId: batch.id, branch: batch.branch, status: 'queued' });
-      if (task.id !== batch.id) addReportComment(reportId, `Merged queued task ${task.id} into batch branch ${batch.branch} so multiple requests are processed together.`, 'info');
+      if (task.id !== batch.id) addReportComment(reportId, `Merged queued task ${task.id} into a direct-push batch for ${batch.branch} so multiple requests are processed together.`, 'info');
     }
   }
   const mergedIds = new Set(merged.map(t => t.id));
@@ -672,8 +685,9 @@ function getBugWatcherPublicStatus() {
     enabled: BUG_WATCHER_ENABLED,
     autoFix: OPENCODE_AUTOFIX,
     autoPush: OPENCODE_AUTO_PUSH,
-    autoPr: OPENCODE_AUTO_PR,
-    autoMerge: BUG_WATCHER_AUTO_MERGE,
+    autoPr: OPENCODE_AUTO_PR && !BUG_WATCHER_DIRECT_PUSH,
+    autoMerge: BUG_WATCHER_AUTO_MERGE && !BUG_WATCHER_DIRECT_PUSH,
+    directPush: BUG_WATCHER_DIRECT_PUSH,
     autoMergeMs: BUG_WATCHER_AUTO_MERGE_MS,
     mergeBranch: BUG_WATCHER_MERGE_BRANCH,
     maxAttempts: BUG_WATCHER_MAX_ATTEMPTS,
@@ -721,7 +735,7 @@ function enqueueBugTask(input) {
     title,
     severity: input.severity || 'error',
     signature,
-    branch: safeBranchName(input.branch || `autofix/${safeSlug(title)}-${short}`, title),
+    branch: BUG_WATCHER_DIRECT_PUSH ? BUG_WATCHER_MERGE_BRANCH : safeBranchName(input.branch || `autofix/${safeSlug(title)}-${short}`, title),
     status: 'queued',
     attempts: 0,
     createdAt: nowIso(),
@@ -792,7 +806,10 @@ function updateReportsForTask(task, status, updates = {}) {
     });
     if (report) {
       const label = status === 'processing' ? 'Processing started or continued.' : status === 'finished' ? `Finished: ${task.summary || 'automated repair completed'}` : status === 'failed' ? `Failed: ${task.summary || 'automated repair did not finish'}` : `Status changed to ${status}.`;
-      addReportComment(reportId, `${label} Branch: ${task.branch}. Next improvement: review the generated branch/PR and add a regression test if this issue can repeat.`, status === 'failed' ? 'error' : status === 'finished' ? 'done' : 'info');
+      const targetLabel = BUG_WATCHER_DIRECT_PUSH
+        ? `Target: ${task.branch}. Direct push mode is enabled, so no feature branch or PR is created.`
+        : `Branch: ${task.branch}. Next improvement: review the generated branch/PR and add a regression test if this issue can repeat.`;
+      addReportComment(reportId, `${label} ${targetLabel}`, status === 'failed' ? 'error' : status === 'finished' ? 'done' : 'info');
     }
   }
 }
@@ -1283,6 +1300,23 @@ async function ensureBugWorktree(task, logFile) {
   normalizeTaskBranch(task);
   const baseBranch = process.env.BUG_WATCHER_BASE_BRANCH || await currentGitBranch(PROJECT_DIR);
   bugWatcherState.baseBranch = baseBranch;
+  if (BUG_WATCHER_DIRECT_PUSH) {
+    const worktree = path.join(bugWorktreesDir, `direct-${safeSlug(task.id || task.title)}`);
+    ensureDir(bugWorktreesDir);
+    let result = await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} fetch origin ${shQuote(BUG_WATCHER_MERGE_BRANCH)}`, { cwd: PROJECT_DIR, logFile, timeout: 300000 });
+    if (!result.ok) throw new Error((result.stderr || result.stdout || `Unable to fetch ${BUG_WATCHER_MERGE_BRANCH}`).slice(-1200));
+    result = await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} worktree prune --expire now`, { cwd: PROJECT_DIR, logFile, timeout: 120000 });
+    if (!result.ok) throw new Error((result.stderr || result.stdout || 'Worktree prune failed').slice(-1200));
+    if (fs.existsSync(worktree)) {
+      const remove = await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} worktree remove ${shQuote(worktree)} --force`, { cwd: PROJECT_DIR, logFile, timeout: 120000 });
+      if (!remove.ok && fs.existsSync(worktree)) fs.rmSync(worktree, { recursive: true, force: true });
+      await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} worktree prune --expire now`, { cwd: PROJECT_DIR, logFile, timeout: 120000 });
+    }
+    result = await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} worktree add --detach ${shQuote(worktree)} ${shQuote(`origin/${BUG_WATCHER_MERGE_BRANCH}`)}`, { cwd: PROJECT_DIR, logFile, timeout: 180000 });
+    if (!result.ok) throw new Error(`Unable to create direct-push worktree for ${BUG_WATCHER_MERGE_BRANCH}`);
+    await ensureGitSafeDirectory(worktree, logFile);
+    return { worktree, baseBranch: BUG_WATCHER_MERGE_BRANCH, directPush: true };
+  }
   const worktree = path.join(bugWorktreesDir, safeSlug(task.branch));
   ensureDir(bugWorktreesDir);
   await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} worktree prune --expire now`, { cwd: PROJECT_DIR, logFile, timeout: 120000 });
@@ -1321,14 +1355,18 @@ function resolveOpenCodeCommand() {
   return OPENCODE_CMD;
 }
 
-function buildAutofixPrompt(task, baseBranch) {
+function buildAutofixPrompt(task, baseBranch, directPush = BUG_WATCHER_DIRECT_PUSH) {
   return [
     'You are the fully automated bug watcher for this repository.',
-    `Work only on branch ${task.branch}, based on ${baseBranch}.`,
+    directPush
+      ? `Work in this detached repair worktree based on origin/${baseBranch}; the watcher will push the validated commit directly to ${baseBranch}.`
+      : `Work only on branch ${task.branch}, based on ${baseBranch}.`,
     'Do not ask the user questions. Do not wait for interaction. Make the smallest correct fix.',
     'Treat warnings as small errors. If a dependency or tool is missing, install it automatically.',
     OPENCODE_ALLOW_SUDO ? 'You may use sudo without asking when a missing dependency or software package requires it.' : 'Do not use sudo because OPENCODE_ALLOW_SUDO is disabled.',
-    'Keep changes project-scoped. Do not alter unrelated user data. Do not push; the watcher will commit, push, and create/comment on the PR.',
+    directPush
+      ? 'Keep changes project-scoped. Do not alter unrelated user data. Do not push; the watcher will commit, push to main, and redeploy the website.'
+      : 'Keep changes project-scoped. Do not alter unrelated user data. Do not push; the watcher will commit, push, and create/comment on the PR.',
     '',
     `Task: ${task.title}`,
     `Severity: ${task.severity}`,
@@ -1368,6 +1406,7 @@ function reportCommentsForTask(task) {
 }
 
 async function createOrUpdatePullRequest(task, worktree, baseBranch, logFile) {
+  if (BUG_WATCHER_DIRECT_PUSH) return '';
   if (!OPENCODE_AUTO_PR) return '';
   if (!(await commandExists('gh'))) {
     appendSession(logFile, '\n[pr] gh is not installed; skipping PR creation.\n');
@@ -1414,6 +1453,16 @@ function scheduleAutoMerge(task) {
     task.mergeStatus = 'not-needed';
     task.mergedAt = task.mergedAt || nowIso();
     updateReportsForTask(task, 'finished', { mergeStatus: task.mergeStatus, mergedAt: task.mergedAt });
+    return;
+  }
+  if (BUG_WATCHER_DIRECT_PUSH) {
+    task.mergeStatus = 'merged';
+    task.mergeTarget = BUG_WATCHER_MERGE_BRANCH;
+    task.mergedAt = task.mergedAt || nowIso();
+    updateReportsForTask(task, 'merged', { mergeStatus: task.mergeStatus, mergeTarget: task.mergeTarget, mergedAt: task.mergedAt });
+    for (const reportId of task.reportIds || []) {
+      addReportComment(reportId, `Pushed directly to ${BUG_WATCHER_MERGE_BRANCH} and scheduled the website redeploy.`, 'done');
+    }
     return;
   }
   if (!BUG_WATCHER_AUTO_MERGE || !task.branch) {
@@ -1501,6 +1550,7 @@ function finishCancelledBugTask(task) {
 }
 
 async function processAutoMerges(ios) {
+  if (BUG_WATCHER_DIRECT_PUSH) return;
   if (bugAutoMergeRunning || !BUG_WATCHER_AUTO_MERGE) return;
   const task = bugWatcherState.completed.find(t => t.status === 'completed' && t.mergeStatus === 'pending' && t.mergeAfter && Date.parse(t.mergeAfter) <= Date.now());
   if (!task) return;
@@ -1573,8 +1623,14 @@ async function rebuildSiteAfterFix(task, logFile) {
     HOST_IP: LOCAL_IP
   };
   task.siteRestartStartedAt = nowIso();
-  updateReportsForTask(task, 'finished', { summary: `${task.summary || ''} Site rebuild/restart started.`.trim() });
+  const reportStatus = BUG_WATCHER_DIRECT_PUSH && task.mergeStatus === 'merged' ? 'merged' : 'finished';
+  updateReportsForTask(task, reportStatus, { summary: `${task.summary || ''} Site rebuild/restart started.`.trim() });
   saveBugWatcherState();
+  if (BUG_WATCHER_DIRECT_PUSH) {
+    appendSession(logFile, `\n[site] syncing ${BUG_WATCHER_MERGE_BRANCH} after direct push\n`);
+    const sync = await runShellLogged(`git -c safe.directory=${shQuote(PROJECT_DIR)} pull --ff-only origin ${shQuote(BUG_WATCHER_MERGE_BRANCH)}`, { cwd: PROJECT_DIR, env, timeout: 300000, logFile });
+    if (!sync.ok) throw new Error((sync.stderr || sync.stdout || `Unable to sync ${BUG_WATCHER_MERGE_BRANCH} after direct push`).slice(-1200));
+  }
   appendSession(logFile, '\n[site] rebuilding control image after automated fix\n');
   await runShellLogged('docker compose -f compose.web.yml build control', { cwd: PROJECT_DIR, env, timeout: 600000, logFile });
   appendSession(logFile, '\n[site] scheduling control restart with helper container\n');
@@ -1598,7 +1654,7 @@ async function rebuildSiteAfterFix(task, logFile) {
   const helper = await runShellLogged(helperCmd, { cwd: PROJECT_DIR, env, timeout: 120000, logFile });
   if (!helper.ok) await runShellLogged('docker compose -f compose.web.yml up -d control', { cwd: PROJECT_DIR, env, timeout: 300000, logFile });
   task.siteRestartedAt = nowIso();
-  updateReportsForTask(task, 'finished', { summary: `${task.summary || ''} Site restart scheduled.`.trim() });
+  updateReportsForTask(task, reportStatus, { summary: `${task.summary || ''} Site restart scheduled.`.trim() });
   saveBugWatcherState();
 }
 
@@ -1654,9 +1710,9 @@ async function processNextBugTask(ios) {
     }
     await installMissingDependencies();
     if (finishIfCancelled()) return;
-    const { worktree, baseBranch } = await ensureBugWorktree(task, task.sessionLog);
+    const { worktree, baseBranch, directPush } = await ensureBugWorktree(task, task.sessionLog);
     if (finishIfCancelled()) return;
-    const prompt = buildAutofixPrompt(task, baseBranch);
+    const prompt = buildAutofixPrompt(task, baseBranch, directPush);
     const promptFile = path.join(bugSessionsDir, `${task.id}-agent-prompt-${sessionStamp()}.txt`);
     ensureDir(path.dirname(promptFile));
     fs.writeFileSync(promptFile, prompt);
@@ -1684,12 +1740,12 @@ async function processNextBugTask(ios) {
     task.summary = fix.summary;
     if (checks.ok) {
       const comments = [
-        `How it went: automated opencode ran non-interactively on ${task.branch} and validation passed.`,
+        `How it went: automated opencode ran non-interactively for ${directPush ? `direct push to ${baseBranch}` : task.branch} and validation passed.`,
         'How it should improve: add or keep regression coverage for this signature so the watcher catches repeat issues sooner.'
       ];
       const artifactFields = { sessionLog: path.relative(PROJECT_DIR, task.sessionLog), agentFile: task.agentFile || '' };
       appendChangelogEntry({ severity: task.severity === 'warning' ? 'warning' : 'fix', title: task.title, summary: task.summary, cause: task.cause, fixed: [task.details.slice(0, 300)], comments, branch: task.branch, ...artifactFields }, worktree);
-      appendRuntimeChangelogEntry({ severity: task.severity === 'warning' ? 'warning' : 'fix', title: task.title, summary: task.summary, cause: task.cause, fixed: [task.details.slice(0, 300)], comments, branch: task.branch, ...artifactFields });
+      if (!directPush) appendRuntimeChangelogEntry({ severity: task.severity === 'warning' ? 'warning' : 'fix', title: task.title, summary: task.summary, cause: task.cause, fixed: [task.details.slice(0, 300)], comments, branch: task.branch, ...artifactFields });
       const status = await runShellLogged(gitSafe(worktree, 'status --short'), { cwd: worktree, logFile: task.sessionLog });
       if (!status.ok) throw new Error((status.stderr || status.stdout || 'Git status failed').slice(-1200));
       if (status.stdout.trim()) {
@@ -1698,7 +1754,8 @@ async function processNextBugTask(ios) {
         result = await runShellLogged(`git -c safe.directory=${shQuote(path.resolve(worktree))} -c user.name=${shQuote(process.env.GIT_AUTHOR_NAME || 'Overworld Visitor Bot')} -c user.email=${shQuote(process.env.GIT_AUTHOR_EMAIL || 'overworld-visitor-bot@example.invalid')} commit -m ${shQuote(`fix: auto repair ${task.title}`)}`, { cwd: worktree, logFile: task.sessionLog, timeout: 180000 });
         if (!result.ok) throw new Error((result.stderr || result.stdout || 'Git commit failed').slice(-1200));
         if (OPENCODE_AUTO_PUSH) {
-          result = await runShellLogged(gitSafe(worktree, `push -u origin ${shQuote(task.branch)}`), { cwd: worktree, logFile: task.sessionLog, timeout: 300000 });
+          const pushTarget = directPush ? `HEAD:${baseBranch}` : task.branch;
+          result = await runShellLogged(gitSafe(worktree, `push ${directPush ? 'origin' : '-u origin'} ${shQuote(pushTarget)}`), { cwd: worktree, logFile: task.sessionLog, timeout: 300000 });
           if (!result.ok) throw new Error((result.stderr || result.stdout || 'Git push failed').slice(-1200));
         }
         task.prUrl = await createOrUpdatePullRequest(task, worktree, baseBranch, task.sessionLog);
@@ -2110,7 +2167,9 @@ function mountRoutes(app, ios) {
       if (bugWatcherState.reports.length > 200) bugWatcherState.reports = bugWatcherState.reports.slice(-200);
       const task = enqueueBugTask({ source: 'bug-report', title, details: `${details}\n\nPage: ${report.page}\nUser-Agent: ${report.userAgent}\nPublic IPv4: ${report.publicIpv4 || 'unknown'}\nObserved IPv4: ${report.observedIpv4 || 'unknown'}`, severity, reportId: report.id });
       updateReport(report.id, { taskId: task.id, branch: task.branch, status: task.status === 'running' ? 'processing' : 'approved' });
-      addReportComment(report.id, `Queued on branch ${task.branch}. How it should improve: related reports now share this branch so duplicate work is avoided.`, 'info');
+      addReportComment(report.id, BUG_WATCHER_DIRECT_PUSH
+        ? `Queued for direct push to ${task.branch}. How it should improve: related reports are batched together and deployed without creating feature branches.`
+        : `Queued on branch ${task.branch}. How it should improve: related reports now share this branch so duplicate work is avoided.`, 'info');
       saveBugWatcherState();
       elog(ios, `Bug report queued: ${title}`, severity === 'warning' ? 'warn' : 'error');
       processNextBugTask(ios);
@@ -2146,7 +2205,9 @@ function mountRoutes(app, ios) {
           details: `User feedback requested improvements for report ${report.id}.\n\nReport title: ${report.title}\nOriginal details:\n${report.details || ''}\n\nUser feedback:\n${message}\n\nPublic IPv4: ${publicIpv4 || 'unknown'}\nObserved IPv4: ${observedIpv4 || 'unknown'}`
         });
         updateReport(report.id, { taskId: task.id, branch: task.branch, status: 'approved' });
-        addReportComment(report.id, `Feedback queued for automated improvement on branch ${task.branch}. How it should improve: the checker will run opencode again using this comment as additional requirements.`, 'info');
+        addReportComment(report.id, BUG_WATCHER_DIRECT_PUSH
+          ? `Feedback queued for automated improvement and direct push to ${task.branch}. How it should improve: the checker will run opencode again using this comment as additional requirements.`
+          : `Feedback queued for automated improvement on branch ${task.branch}. How it should improve: the checker will run opencode again using this comment as additional requirements.`, 'info');
       }
       processNextBugTask(ios);
       res.json({ ok: true, report: publicBugReport(bugWatcherState.reports.find(r => r.id === report.id)), task: publicBugTask(task), status: getBugWatcherPublicStatus() });
