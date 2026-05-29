@@ -50,6 +50,18 @@ test('selectRegions skips visited regions and works outside a git checkout', () 
   }
 });
 
+test('regionExists only returns true for existing MCA files', () => {
+  const { root, worldDir } = makeWorld(['r.0.0.mca']);
+
+  try {
+    assert.equal(regions.regionExists(worldDir, 0, 0), true);
+    assert.equal(regions.regionExists(worldDir, 1, 0), false);
+    assert.equal(regions.regionFilePath(worldDir, 0, 0), path.join(worldDir, 'dimensions', 'minecraft', 'overworld', 'region', 'r.0.0.mca'));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('assignBotRegions starts center-out and keeps bots spread apart', () => {
   const { root, worldDir } = makeWorld([
     'r.-2.0.mca',

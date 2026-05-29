@@ -16,8 +16,20 @@ function regionCenter(rx, rz) {
 
 const OVERWORLD_REGION = ['dimensions', 'minecraft', 'overworld', 'region'];
 
+function regionDirPath(worldDir) {
+  return path.join(worldDir, ...OVERWORLD_REGION);
+}
+
+function regionFilePath(worldDir, rx, rz) {
+  return path.join(regionDirPath(worldDir), `r.${rx}.${rz}.mca`);
+}
+
+function regionExists(worldDir, rx, rz) {
+  return fs.existsSync(regionFilePath(worldDir, rx, rz));
+}
+
 function getAllRegions(worldDir) {
-  const regionDir = path.join(worldDir, ...OVERWORLD_REGION);
+  const regionDir = regionDirPath(worldDir);
   if (!fs.existsSync(regionDir)) return [];
   return fs.readdirSync(regionDir)
     .map(f => {
@@ -111,7 +123,8 @@ function selectRegions(allRegions, state, newOnly, worldDir) {
   const visited = state.visited || {};
 
   if (newOnly && state.lastCommit && currentCommit) {
-    const newRegions = getGitDiffRegions(worldDir, state.lastCommit, currentCommit);
+    const newRegions = getGitDiffRegions(worldDir, state.lastCommit, currentCommit)
+      .filter(r => regionExists(worldDir, r.rx, r.rz));
     const unvisitedNew = newRegions.filter(r => !visited[regionKey(r.rx, r.rz)]);
     console.log(`Found ${newRegions.length} new/modified regions in git (${unvisitedNew.length} unvisited)`);
     return { regions: unvisitedNew, currentCommit };
@@ -121,7 +134,7 @@ function selectRegions(allRegions, state, newOnly, worldDir) {
     console.log('NEW_ONLY mode but no previous state found. Falling back to all unvisited regions.');
   }
 
-  const unvisited = allRegions.filter(r => !visited[regionKey(r.rx, r.rz)]);
+  const unvisited = allRegions.filter(r => regionExists(worldDir, r.rx, r.rz) && !visited[regionKey(r.rx, r.rz)]);
   return { regions: unvisited, currentCommit };
 }
 
@@ -133,5 +146,5 @@ function markVisited(state, rx, rz) {
 module.exports = {
   getAllRegions, loadState, saveState, selectRegions,
   markVisited, regionKey, getCurrentCommit, regionCenter,
-  sortCenterOut, assignBotRegions
+  sortCenterOut, assignBotRegions, regionExists, regionFilePath
 };

@@ -529,37 +529,17 @@ function buildFlightGrid(cx, cz, halfSize) {
   }));
 }
 
-function startupOffset() {
-  if (BOT_COUNT <= 1) return { x: 0, z: 0 };
-
-  const spacing = Math.max(32, Math.min(128, Math.floor(RENDER_DISTANCE * 16 / 2)));
-  const ring = [
-    { x: 0, z: 0 },
-    { x: spacing, z: 0 },
-    { x: -spacing, z: 0 },
-    { x: 0, z: spacing },
-    { x: 0, z: -spacing },
-    { x: spacing, z: spacing },
-    { x: -spacing, z: -spacing },
-    { x: spacing, z: -spacing },
-    { x: -spacing, z: spacing }
-  ];
-
-  return ring[BOT_INDEX % ring.length];
-}
-
 async function runStartupSweep(connId) {
   if (startupSweepDone) return;
   startupSweepDone = true;
 
-  const offset = startupOffset();
   const lift = Math.max(16, Math.min(64, RENDER_DISTANCE * 8));
-  const base = { x: offset.x, y: FLY_Y, z: offset.z };
+  const base = { x: 0, y: FLY_Y, z: 0 };
 
   currentRegion = '0,0-start';
   currentWaypoint = 'center';
   writeBotStatus('center-start', true);
-  log(`Starting at world center area near (${base.x}, ${FLY_Y}, ${base.z}) before spreading out`);
+  log(`Starting at world center (${base.x}, ${FLY_Y}, ${base.z}) before spreading out`);
 
   await moveToWaypoint(connId, base);
   await waitForChunksLoaded(connId);
@@ -775,6 +755,13 @@ async function processNext(connId) {
   const key = regions.regionKey(target.rx, target.rz);
   currentRegion = `${target.rx},${target.rz}`;
   currentWaypoint = null;
+
+  if (!regions.regionExists(WORLD_DIR, target.rx, target.rz)) {
+    log(`[${current}/${todo.length}] Missing MCA file for (${target.rx},${target.rz}) - skipping`);
+    idx++;
+    processNext(connId);
+    return;
+  }
 
   if (state.visited && state.visited[key]) {
     log(`[${current}/${todo.length}] Already visited (${target.rx},${target.rz}) - skipping`);
