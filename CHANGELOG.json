@@ -1,5 +1,23 @@
 [
   {
+    "date": "2026-05-29T03:20:34.000Z",
+    "severity": "feature",
+    "title": "Theme toggle and larger website text",
+    "summary": "Added a persistent dark/light theme toggle and increased the dashboard's baseline text sizing for easier reading across controls, cards, logs, forms, and watcher task output.",
+    "cause": "A reported website change asked for dark and light mode and larger text.",
+    "fixed": [
+      "The top toolbar now includes a theme toggle that persists in localStorage.",
+      "Light theme color variables are defined for idle, running, and error states.",
+      "Core dashboard text, buttons, inputs, logs, task cards, and changelog entries now render larger."
+    ],
+    "features": [],
+    "comments": [
+      "How it should improve: the dashboard is easier to read and can switch between dark and light modes without waiting for a branch or PR."
+    ],
+    "branch": "main",
+    "prUrl": ""
+  },
+  {
     "date": "2026-05-28T19:24:01.460Z",
     "severity": "fix",
     "title": "Bots should start exploring at 0,0",
