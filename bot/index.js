@@ -447,6 +447,7 @@ function onSpawn(connId) {
   log('Bot spawned. Starting flight mode...');
   writeBotStatus('spawned', true);
   reconnectAttempts = 0;
+  startupSweepDone = false;
   chat(`/gamemode creative ${MC_USERNAME_FULL}`);
   const followPlayers = getFollowPlayers();
   if (followPlayers.length) {
@@ -541,7 +542,8 @@ async function runStartupSweep(connId) {
   writeBotStatus('center-start', true);
   log(`Starting at world center (${base.x}, ${FLY_Y}, ${base.z}) before spreading out`);
 
-  await moveToWaypoint(connId, base);
+  tpCommand(MC_USERNAME_FULL, base.x, base.y, base.z);
+  await waitForPosition(base, 10000);
   await waitForChunksLoaded(connId);
   await moveToWaypoint(connId, { x: base.x, y: FLY_Y + lift, z: base.z });
   await delay(Math.max(500, Math.min(WP_DELAY, 1500)));
