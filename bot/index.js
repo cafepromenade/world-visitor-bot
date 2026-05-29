@@ -64,7 +64,6 @@ let currentBlackSpot = null;
 let blackSpotTargets = [];
 let pathTrace = [];
 let lastStatusWriteAt = 0;
-let startupSweepDone = false;
 
 function log(msg) {
   console.log(`[${new Date().toISOString()}] ${msg}`);
@@ -447,7 +446,6 @@ function onSpawn(connId) {
   log('Bot spawned. Starting flight mode...');
   writeBotStatus('spawned', true);
   reconnectAttempts = 0;
-  startupSweepDone = false;
   chat(`/gamemode creative ${MC_USERNAME_FULL}`);
   const followPlayers = getFollowPlayers();
   if (followPlayers.length) {
@@ -473,6 +471,7 @@ function onError(err) {
 
 function onEnd() {
   log('Connection ended');
+  activeConnection++;
   writeBotStatus(shuttingDown ? 'stopped' : 'disconnected', true);
   if (shuttingDown) {
     process.exit(0);
@@ -528,27 +527,6 @@ function buildFlightGrid(cx, cz, halfSize) {
     y: wp.y || FLY_Y,
     z: cz + wp.oz
   }));
-}
-
-async function runStartupSweep(connId) {
-  if (startupSweepDone) return;
-  startupSweepDone = true;
-
-  const lift = Math.max(16, Math.min(64, RENDER_DISTANCE * 8));
-  const base = { x: 0, y: FLY_Y, z: 0 };
-
-  currentRegion = '0,0-start';
-  currentWaypoint = 'center';
-  writeBotStatus('center-start', true);
-  log(`Starting at world center (${base.x}, ${FLY_Y}, ${base.z}) before spreading out`);
-
-  tpCommand(MC_USERNAME_FULL, base.x, base.y, base.z);
-  await waitForPosition(base, 10000);
-  await waitForChunksLoaded(connId);
-  await moveToWaypoint(connId, { x: base.x, y: FLY_Y + lift, z: base.z });
-  await delay(Math.max(500, Math.min(WP_DELAY, 1500)));
-  await moveToWaypoint(connId, base);
-  await waitForChunksLoaded(connId);
 }
 
 function delay(ms) {
@@ -731,9 +709,6 @@ async function flyRegion(connId, target, index) {
 }
 
 async function processNext(connId) {
-  if (connId !== activeConnection) return;
-
-  await runStartupSweep(connId);
   if (connId !== activeConnection) return;
 
   if (idx >= todo.length) {
