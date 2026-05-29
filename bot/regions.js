@@ -30,6 +30,26 @@ function getAllRegions(worldDir) {
     .sort((a, b) => a.rz - b.rz || a.rx - b.rx);
 }
 
+function distanceFromOrigin(region) {
+  return Math.hypot(region.cx, region.cz);
+}
+
+function sortCenterOut(regions) {
+  return [...regions].sort((a, b) => {
+    const distance = distanceFromOrigin(a) - distanceFromOrigin(b);
+    if (distance !== 0) return distance;
+
+    const angle = Math.atan2(a.cz, a.cx) - Math.atan2(b.cz, b.cx);
+    return angle || a.rz - b.rz || a.rx - b.rx;
+  });
+}
+
+function assignBotRegions(allRegions, botCount, botIndex) {
+  const count = Math.max(1, botCount | 0);
+  const index = Math.max(0, botIndex | 0);
+  return sortCenterOut(allRegions).filter((_, i) => i % count === index);
+}
+
 function regionKey(rx, rz) {
   return `${rx},${rz}`;
 }
@@ -112,5 +132,6 @@ function markVisited(state, rx, rz) {
 
 module.exports = {
   getAllRegions, loadState, saveState, selectRegions,
-  markVisited, regionKey, getCurrentCommit, regionCenter
+  markVisited, regionKey, getCurrentCommit, regionCenter,
+  sortCenterOut, assignBotRegions
 };

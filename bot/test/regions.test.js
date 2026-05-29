@@ -50,6 +50,31 @@ test('selectRegions skips visited regions and works outside a git checkout', () 
   }
 });
 
+test('assignBotRegions starts center-out and keeps bots spread apart', () => {
+  const { root, worldDir } = makeWorld([
+    'r.-2.0.mca',
+    'r.-1.-1.mca',
+    'r.-1.0.mca',
+    'r.0.-1.mca',
+    'r.0.0.mca',
+    'r.1.0.mca'
+  ]);
+
+  try {
+    const allRegions = regions.getAllRegions(worldDir);
+    const assigned = [0, 1, 2, 3].map(index => regions.assignBotRegions(allRegions, 4, index)[0]);
+
+    assert.deepEqual(assigned.map(r => regions.regionKey(r.rx, r.rz)).sort(), [
+      '-1,-1',
+      '-1,0',
+      '0,-1',
+      '0,0'
+    ]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('loadState and saveState tolerate missing files and create directories', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'overworld-visitor-state-'));
   const statePath = path.join(root, 'nested', 'visited.json');

@@ -356,7 +356,7 @@ function init() {
   }
 
   let allRegions = regions.getAllRegions(WORLD_DIR);
-  allRegions = allRegions.filter((_, i) => i % BOT_COUNT === BOT_INDEX);
+  allRegions = regions.assignBotRegions(allRegions, BOT_COUNT, BOT_INDEX);
   log(`Found ${allRegions.length} regions assigned to bot ${BOT_INDEX}/${BOT_COUNT}`);
 
   state = regions.loadState(STATE_FILE);
@@ -495,21 +495,35 @@ function onEnd() {
 function buildFlightGrid(cx, cz, halfSize) {
   const waypoints = [];
   const step = GRID_STEP;
+  const centerLift = Math.max(16, Math.min(64, RENDER_DISTANCE * 8));
 
-  for (let offset = -halfSize; offset <= halfSize; offset += step) {
-    const row = [];
-    for (let cross = -halfSize; cross <= halfSize; cross += step) {
-      row.push({ ox: offset, oz: cross });
+  waypoints.push({ ox: 0, oz: 0, y: FLY_Y });
+  waypoints.push({ ox: 0, oz: 0, y: FLY_Y + centerLift });
+  waypoints.push({ ox: 0, oz: 0, y: FLY_Y });
+
+  for (let radius = step; radius <= halfSize; radius += step) {
+    const ring = [];
+    for (let offset = -radius; offset <= radius; offset += step) {
+      ring.push({ ox: offset, oz: -radius });
+    }
+    for (let offset = -radius + step; offset <= radius; offset += step) {
+      ring.push({ ox: radius, oz: offset });
+    }
+    for (let offset = radius - step; offset >= -radius; offset -= step) {
+      ring.push({ ox: offset, oz: radius });
+    }
+    for (let offset = radius - step; offset > -radius; offset -= step) {
+      ring.push({ ox: -radius, oz: offset });
     }
     if (waypoints.length % 2 === 1) {
-      row.reverse();
+      ring.reverse();
     }
-    waypoints.push(...row);
+    waypoints.push(...ring);
   }
 
   return waypoints.map(wp => ({
     x: cx + wp.ox,
-    y: FLY_Y,
+    y: wp.y || FLY_Y,
     z: cz + wp.oz
   }));
 }
